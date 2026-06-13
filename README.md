@@ -32,10 +32,25 @@ ORCHESTRATOR (heartbeat loop)
   → DASHBOARD   (live positions, reasoning log, DD gauge, proof links)
 ```
 
-## Quick start
+## Repository layout
+
+```
+GlassBox/
+├── backend/      # the Python trading agent (perceive → reason → gate → execute)
+│   ├── glassbox/ #   the package
+│   ├── rules/    #   rulebook.yaml + token_allowlist.json (the gate's contract)
+│   └── tests/
+├── frontend/     # the transparency dashboard (the demo) — tails the audit log
+├── docs/         # strategy writeup, setup guide, verified hackathon facts
+├── README.md
+└── CLAUDE.md     # full build brief
+```
+
+## Quick start (backend)
 
 ```bash
-pip install -e .
+cd backend
+pip install -e ".[dev]"
 cp .env.example .env          # fill in keys when you wire live stacks
 glassbox --mode paper --once  # runs one full perceive→reason→gate→execute→log cycle
 glassbox --mode paper         # continuous paper-trading loop

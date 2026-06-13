@@ -42,6 +42,7 @@ class Settings:
     allowlist: dict[str, TokenInfo]            # symbol -> TokenInfo
     base_currency: str
     # live-stack credentials (empty in paper mode)
+    dry_run: bool = False     # live mode but QUOTE-ONLY: never broadcasts a swap
     cmc_mcp_api_key: str = ""
     cmc_mcp_endpoint: str = ""
     cmc_x402_enabled: bool = False
@@ -106,6 +107,7 @@ def load_settings(mode: str | None = None) -> Settings:
         mode=mode or os.getenv("GLASSBOX_MODE", "paper"),
         heartbeat_seconds=int(os.getenv("GLASSBOX_HEARTBEAT_SECONDS", "900")),
         data_dir=data_dir,
+        dry_run=_env_bool("GLASSBOX_DRY_RUN"),
         rulebook=rulebook,
         allowlist=allowlist,
         base_currency=base_currency,
@@ -113,7 +115,7 @@ def load_settings(mode: str | None = None) -> Settings:
         cmc_mcp_endpoint=os.getenv("CMC_MCP_ENDPOINT", "https://mcp.coinmarketcap.com/mcp"),
         cmc_x402_enabled=_env_bool("CMC_X402_ENABLED"),
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
-        llm_model=os.getenv("GLASSBOX_LLM_MODEL", "claude-opus-4-8"),
+        llm_model=os.getenv("GLASSBOX_LLM_MODEL", "claude-sonnet-4-6"),
         twak_access_id=os.getenv("TWAK_ACCESS_ID", ""),
         twak_hmac_secret=os.getenv("TWAK_HMAC_SECRET", ""),
         twak_mcp_endpoint=os.getenv("TWAK_MCP_ENDPOINT", "https://mcp.trustwallet.com/tws"),

@@ -174,11 +174,21 @@ def main() -> None:
     ap.add_argument("--mode", choices=["paper", "live"], default=None,
                     help="override GLASSBOX_MODE")
     ap.add_argument("--once", action="store_true", help="run a single cycle and exit")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="live data + real quotes, but NEVER broadcast a swap")
     args = ap.parse_args()
 
     settings = load_settings(mode=args.mode)
+    if args.dry_run:
+        settings.dry_run = True
     if settings.is_live:
-        print("⚠️  LIVE mode. Ensure TWAK is running (`twak serve`) and keys are set.")
+        if settings.dry_run:
+            print("🧪 LIVE DRY-RUN: real quotes, NO on-chain swaps will be broadcast.")
+        else:
+            print("\n" + "=" * 64)
+            print("⚠️  LIVE TRADING MODE — this BROADCASTS REAL ON-CHAIN SWAPS.")
+            print("    The agent wallet will move real funds. Ctrl-C now to abort.")
+            print("=" * 64 + "\n")
     orch = Orchestrator(settings)
 
     if args.once:

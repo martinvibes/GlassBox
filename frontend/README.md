@@ -1,31 +1,40 @@
 # GlassBox — frontend (the transparency dashboard)
 
-This is **the demo**. In a contest where transparency is the differentiator, the
-live dashboard is what wins the panel: it streams the agent's reasoning, positions,
-and risk posture in real time, with on-chain proof links.
+A dark "glass trading terminal": real TradingView candlestick charts, a hero **drawdown
+gauge** that proves the survival thesis, a live **reasoning feed** (the agent's audit log),
+positions, and on-chain proof links. Editorial serif + monospace data, mint/danger accent
+system, grain + glow atmosphere.
 
-## What it shows
-- **Live positions & equity curve** vs. the high-water mark.
-- **Drawdown gauge** — current DD against our internal ceiling and the competition cap.
-  This visually proves "we never get close to the gate."
-- **Reasoning feed** — tails the backend's `data/decisions.jsonl` audit log: every
-  proposal, the gate's verdict + reasons, and the resulting fill. OpenAlice-style.
-- **On-chain proof links** — each decision's ERC-8004 anchor tx (BscScan link).
+**Built with:** Next.js 15 (App Router, TS) · Tailwind v4 · lightweight-charts (TradingView)
+· framer-motion. Fonts: Instrument Serif / IBM Plex Mono / Schibsted Grotesk.
 
-## Planned stack
-Start with a **Streamlit** app (fastest path to a working demo that reads the JSONL
-log directly). If time allows, upgrade to a **Next.js** app that consumes a small
-read-only API exposed by the backend (`backend/glassbox/api.py`, TODO).
+## Run
 
-```
-frontend/
-  streamlit_app.py     # v1 — reads ../backend/data/decisions.jsonl directly  (TODO)
-  web/                 # v2 — Next.js dashboard against a backend API          (later)
+```bash
+cd frontend
+npm install
+npm run dev        # → http://localhost:4555
 ```
 
-## Data contract
-The frontend is **read-only**. It never trades. It consumes:
-- `backend/data/decisions.jsonl` — the hash-chained DecisionRecord stream.
-- `backend/data/portfolio.json`  — current positions + high-water mark.
+It reads the **real** backend artifacts (no mock data):
+- `../backend/data/decisions.jsonl` — hash-chained reasoning/audit log → feed + equity curve
+- `../backend/data/portfolio.json` — positions + high-water mark
+- `../backend/data/agent_identity.json` — ERC-8004 id (if registered)
+- `../backend/.env` + `../backend/rules/rulebook.yaml` — wallet, mode, drawdown caps
 
-See `backend/glassbox/models.py` (`DecisionRecord`) for the exact schema.
+Price candles are **real OHLC** proxied from CoinGecko (keyless). The whole UI polls every 5s.
+
+> Tip: populate the feed/curve first by running the backend a few times:
+> `cd ../backend && . .venv/bin/activate && for i in $(seq 8); do glassbox --mode paper --once; sleep 8; done`
+> (the `sleep` avoids CoinGecko rate limits — without it, cycles degrade to the safe risk-off view).
+
+## Layout
+- **TopBar** — wordmark, live regime pill, mode/cycles/wallet, UTC clock.
+- **Hero** — drawdown gauge (safe→DQ zones) · total equity + net PnL · F&G / high-water / cycles / posture tiles.
+- **Charts** — BNB/BTC/ETH/CAKE candlesticks (24h) · equity area curve vs. start baseline.
+- **Feed + Positions** — streaming decision log with gate verdicts + rationale · holdings + ERC-8004 / wallet / chain proof.
+
+## API routes (server-side, read-only)
+- `GET /api/state` — portfolio, equity series, drawdown, regime, caps, wallet, agent id
+- `GET /api/decisions?limit=N` — newest-first decision records
+- `GET /api/candles?symbol=BNB&days=1` — real OHLC from CoinGecko

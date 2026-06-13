@@ -94,7 +94,9 @@ class Executor:
         base_asset = bsc_token_ref(self.s.allowlist[base])
         sym_asset = bsc_token_ref(self.s.allowlist[sym])
         slippage_pct = self.s.rulebook["limits"]["max_slippage_bps"] / 100.0
-        pw = self.s.twak_wallet_password or None
+        # Do NOT pass --password on the CLI (visible in process list / shell history).
+        # The CLI uses the OS keychain or the inherited TWAK_WALLET_PASSWORD env var.
+        pw = None
 
         if decision.action == Action.BUY:
             amount = decision.approved_notional_usd      # in base-currency (≈USD) units
@@ -124,7 +126,14 @@ class Executor:
                 error=f"price impact {impact}% exceeds slippage cap {slippage_pct}%",
             )
 
-        # 2. execute the real swap (signs locally)
+        # DRY-RUN: report what we WOULD do, from the quote, without broadcasting.
+        if self.s.dry_run:
+            res = self._parse_swap_result(decision, sym, amount, quote.raw, prices_usd)
+            res.venue = "pancakeswap(dry-run)"
+            res.tx_hash = None
+            return res
+
+        # 2. execute the real swap (signs locally) — THIS BROADCASTS ON-CHAIN
         res = self.cli.swap(amount, from_asset, to_asset, slippage_pct,
                             quote_only=False, password=pw)
         if not res.ok:

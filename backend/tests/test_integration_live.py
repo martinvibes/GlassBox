@@ -14,7 +14,9 @@ import pytest
 
 from glassbox.config import load_settings
 from glassbox.execution.twak import Executor
-from glassbox.models import Action, GateVerdict, Portfolio, Regime, Signals, TradeProposal
+from glassbox.models import (
+    Action, GateDecision, GateVerdict, Portfolio, Regime, Signals, TradeProposal,
+)
 from glassbox.perception.market import LiveMarketData
 from glassbox.risk import gate as G
 from glassbox.risk.gate import RiskState
@@ -47,6 +49,31 @@ def test_live_market_data_is_real_and_sane():
     for sym, blob in sig.tokens.items():
         assert "momentum_24h" in blob and "liquidity_usd" in blob
         assert blob["liquidity_usd"] >= 0
+
+
+def test_live_dry_run_quotes_but_never_broadcasts():
+    """Live dry-run hits the REAL TWAK swap quote but must never broadcast a tx.
+    Skips if TWAK isn't installed/authenticated."""
+    from glassbox.execution.twak import Executor
+    from glassbox.execution.twak_cli import TwakCLI
+
+    s = load_settings(mode="live")
+    s.dry_run = True
+    s.rulebook["_allowlist_symbols"] = set(s.allowlist.keys())
+    if not TwakCLI(s).available() or not s.twak_access_id:
+        pytest.skip("twak CLI not installed / not authenticated")
+
+    d = GateDecision(
+        verdict=GateVerdict.ALLOW, action=Action.BUY, symbol="WBNB",
+        approved_size_pct=10, approved_notional_usd=100.0,
+    )
+    pf = Portfolio(base_currency="USDT", cash_usd=1000.0, high_water_mark_usd=1000.0)
+    res = Executor(s).execute(d, pf, {"WBNB": 605.0, "USDT": 1.0})
+    if not res.ok:
+        pytest.skip(f"quote unavailable in this environment: {res.error}")
+    assert res.tx_hash is None              # the safety guarantee: no broadcast
+    assert "dry-run" in res.venue
+    assert res.filled_qty > 0               # a real quote came back
 
 
 def test_full_buy_then_flatten_against_real_prices():

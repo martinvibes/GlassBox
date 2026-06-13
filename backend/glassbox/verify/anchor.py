@@ -38,7 +38,8 @@ class Anchor:
         self._load_identity()
 
     def _password(self) -> str | None:
-        return self.s.twak_wallet_password or None
+        # Prefer keychain / inherited TWAK_WALLET_PASSWORD env over passing --password.
+        return None
 
     def _load_identity(self) -> None:
         if self._id_path.exists():

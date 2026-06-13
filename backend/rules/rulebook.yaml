@@ -1,0 +1,49 @@
+# GlassBox rulebook — the contract the deterministic risk gate enforces.
+# The LLM proposes; THIS file (via gate.py) disposes. Tune values, don't remove keys.
+#
+# ⚠️ Values are CONSERVATIVE placeholders. Confirm the competition's exact
+# max-drawdown %, minimum trade count, and token allowlist on the DoraHacks
+# /detail page, then keep our internal ceilings comfortably inside theirs.
+
+version: 1
+
+capital:
+  base_currency: USDT          # we measure PnL and rest in this
+  starting_equity_usd: 1000.0  # paper/live starting bankroll (set per live window)
+
+drawdown:
+  competition_cap_pct: 30.0    # the DQ line we MUST NOT cross (confirm exact value)
+  internal_ceiling_pct: 12.0   # OUR hard flatten-and-pause trigger (well inside the cap)
+  pause_after_breach_hours: 12 # cool-off before re-deploying after an internal breach
+
+sizing:
+  max_position_pct: 25.0       # max % of equity in a single token position
+  max_gross_exposure_pct: 60.0 # max % of equity deployed across all positions at once
+  max_trade_pct: 15.0          # max % of equity moved in a single trade
+  min_trade_usd: 25.0          # don't bother below this (fees dominate)
+
+limits:
+  max_trades_per_day: 6        # avoid churn / fee bleed
+  trade_cooldown_minutes: 30   # min gap between executed trades
+  max_slippage_bps: 80         # reject if quoted slippage exceeds this (0.80%)
+
+conviction:
+  min_score_to_enter: 0.62     # LLM/heuristic conviction floor to OPEN a position (0..1)
+  min_score_to_add: 0.72       # higher bar to ADD to an existing position
+
+activity:
+  # Competition requires minimum activity. We satisfy it deliberately and safely.
+  min_trades_total: 7          # over the whole live window (confirm exact)
+  min_trades_per_day: 1        # ensure we never get DQ'd for inactivity
+  activity_trade_max_pct: 3.0  # a forced "keep-alive" trade is tiny by design
+
+# Regime postures map a perceived market regime → how aggressive we may be.
+# FLAT is the default and safest. The gate clamps proposals to the posture.
+regimes:
+  risk_off:    { max_gross_exposure_pct: 0.0,  note: "stay in stablecoin" }
+  neutral:     { max_gross_exposure_pct: 20.0, note: "tiny probes only" }
+  risk_on:     { max_gross_exposure_pct: 50.0, note: "deploy on conviction" }
+  euphoria:    { max_gross_exposure_pct: 30.0, note: "trim into strength, fade froth" }
+
+defaults:
+  posture: risk_off            # when regime is unknown, assume the worst

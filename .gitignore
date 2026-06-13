@@ -1,0 +1,28 @@
+# Secrets — NEVER commit
+.env
+*.pem
+*.key
+~/.twak/
+
+# Runtime data
+data/
+*.jsonl
+!tests/**/*.jsonl
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+
+.claude
+CLAUDE.md

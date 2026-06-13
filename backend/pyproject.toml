@@ -1,0 +1,29 @@
+[project]
+name = "glassbox"
+version = "0.1.0"
+description = "Transparent, risk-gated autonomous trading agent for BNB Chain (BNB HACK Track 1)"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.6",
+    "pyyaml>=6.0",
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+llm = ["anthropic>=0.40"]
+dashboard = ["streamlit>=1.36", "plotly>=5.22"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+glassbox = "glassbox.orchestrator:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["glassbox*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

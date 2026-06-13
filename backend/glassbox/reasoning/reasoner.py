@@ -126,8 +126,12 @@ class Reasoner:
             if sym not in self.s.allowlist or self.s.allowlist[sym].is_stable:
                 continue
             mom = float(blob.get("momentum_24h", 0.0))
-            slip = float(blob.get("est_slippage_bps", 999))
-            if mom <= 0 or slip > self.s.rulebook["limits"]["max_slippage_bps"]:
+            # slippage is only known if a signal source provided it; when absent it
+            # is quoted for real at execution time, so don't pre-filter on it here.
+            slip = blob.get("est_slippage_bps")
+            if mom <= 0:
+                continue
+            if slip is not None and float(slip) > self.s.rulebook["limits"]["max_slippage_bps"]:
                 continue
             # conviction grows with momentum, dampened in non-risk_on regimes
             regime_mult = {

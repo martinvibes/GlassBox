@@ -1,54 +1,93 @@
-"""Verifiability layer — BNB AI Agent SDK (ERC-8004 identity + decision anchoring).
+"""Verifiability layer — on-chain decision anchoring via ERC-8004.
 
-This is the audit trail that makes GlassBox "glass": each DecisionRecord's canonical
-hash is posted on-chain, so judges can verify our reasoning log wasn't edited after
-the fact. It also registers the agent's ERC-8004 identity (→ "Best BNB SDK" special).
+This is the audit trail that makes GlassBox "glass": the agent has an on-chain
+ERC-8004 identity (an NFT), and each DecisionRecord's canonical hash is written to
+that identity's on-chain metadata — so judges can verify our reasoning log wasn't
+edited after the fact. (→ "Best BNB SDK" / on-chain-proof story.)
 
-⚠️ The BNB AI Agent SDK is TESTNET-ONLY at time of writing (mainnet contracts not
-deployed). So anchoring runs on BSC testnet for now; promote to mainnet only once
-contracts are live. Re-check in week 1.
+Implemented with the real `twak erc8004` CLI, which has known registry deployments
+on both `bsc` (mainnet) and `bsctestnet`. The wallet signs locally via ~/.twak/.
 
-FAIL-SOFT CONTRACT: anchoring must NEVER block or delay a trade. If it fails, we log
-the hash locally and carry on — the JSONL log is still the source of truth.
+FAIL-SOFT CONTRACT: anchoring must NEVER block or delay a trade. On any failure we
+log the hash locally (the hash-chained JSONL is the source of truth) and continue.
+
+GAS NOTE: minting the identity and writing metadata cost gas. Identity is minted
+ONCE (cached in data/agent_identity.json). Anchoring is OFF by default
+(BNB_ANCHORING_ENABLED=false); enable it for the live window / demo.
 """
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from glassbox.config import Settings
+from glassbox.execution.twak_cli import TwakCLI
+
+AGENT_URI = "data:application/json,%7B%22name%22%3A%22GlassBox%22%7D"  # {"name":"GlassBox"}
 
 
 class Anchor:
     def __init__(self, settings: Settings) -> None:
         self.s = settings
-        self.enabled = settings.bnb_anchoring_enabled and bool(settings.bnb_agent_private_key)
+        self.cli = TwakCLI(settings)
+        self.enabled = settings.bnb_anchoring_enabled
+        self.chain = settings.anchor_chain
         self.agent_id: str | None = None
+        self._id_path: Path = settings.data_dir / "agent_identity.json"
+        self._load_identity()
+
+    def _password(self) -> str | None:
+        return self.s.twak_wallet_password or None
+
+    def _load_identity(self) -> None:
+        if self._id_path.exists():
+            try:
+                self.agent_id = json.loads(self._id_path.read_text()).get("agent_id")
+            except Exception:
+                self.agent_id = None
 
     def register_identity(self) -> str | None:
-        """Register (or load) the agent's ERC-8004 identity. Returns agent id.
-
-        TODO(wire): use the bnbagent SDK:
-            from bnbagent import Agent
-            agent = Agent.from_key(self.s.bnb_agent_private_key, rpc=self.s.bnb_rpc_url)
-            self.agent_id = agent.register_erc8004(name="GlassBox", ...)
-        """
-        if not self.enabled:
+        """Mint (once) the agent's ERC-8004 identity. Cached so we never re-mint.
+        Returns the agent id, or None if disabled/unavailable."""
+        if not self.enabled or self.agent_id:
+            return self.agent_id
+        if not self.cli.available():
             return None
         try:
-            raise NotImplementedError("ERC-8004 registration not wired — see TODO(wire)")
+            res = self.cli.erc8004_register(
+                AGENT_URI, {"name": "GlassBox", "track": "bnbhack-t1"},
+                self.chain, self._password(),
+            )
+            if res.ok:
+                aid = (
+                    res.raw.get("agentId") or res.raw.get("agent_id")
+                    or res.raw.get("tokenId") or res.raw.get("id")
+                )
+                if aid:
+                    self.agent_id = str(aid)
+                    self._id_path.write_text(
+                        json.dumps({"agent_id": self.agent_id, "chain": self.chain})
+                    )
         except Exception:
             return None
+        return self.agent_id
 
     def anchor(self, decision_hash: str) -> str | None:
-        """Post a decision hash on-chain. Returns tx hash, or None on any failure.
-
-        TODO(wire): write `decision_hash` to the agent's on-chain attestation/
-        feedback registry via the bnbagent SDK, then return the tx hash.
-
-        Fail-soft: on ANY error, swallow and return None. Trading continues.
-        """
-        if not self.enabled:
+        """Write a decision hash to the identity's on-chain metadata. Returns the
+        tx hash, or None on any failure. Fail-soft: trading never depends on this."""
+        if not self.enabled or not self.agent_id:
             return None
         try:
-            raise NotImplementedError("on-chain anchoring not wired — see TODO(wire)")
+            res = self.cli.erc8004_set_metadata(
+                self.agent_id, "glassbox:lastDecision", "0x" + decision_hash,
+                self.chain, self._password(),
+            )
+            if res.ok:
+                return (
+                    res.raw.get("txHash") or res.raw.get("tx_hash")
+                    or res.raw.get("hash") or res.raw.get("transactionHash")
+                )
         except Exception:
             return None
+        return None

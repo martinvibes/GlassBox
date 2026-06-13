@@ -127,3 +127,29 @@ class TwakCLI:
 
     def wallet_balance(self) -> TwakResult:
         return self.run(["wallet", "balance", "--chain", "bsc", "--all", "--json"], timeout=45)
+
+    def wallet_portfolio(self, chains: str = "bsc") -> TwakResult:
+        """Live USD balances + token holdings — used to reconcile the portfolio."""
+        return self.run(["wallet", "portfolio", "--chains", chains, "--json"], timeout=60)
+
+    # ── ERC-8004 identity (on-chain proof; bsc + bsctestnet have deployments) ──
+    def erc8004_register(
+        self, uri: str, metadata: dict | None, chain: str, password: str | None,
+    ) -> TwakResult:
+        args = ["erc8004", "register", "--uri", uri, "--chain", chain, "--json"]
+        for k, v in (metadata or {}).items():
+            args += ["--metadata", f"{k}={v}"]
+        if password:
+            args += ["--password", password]
+        return self.run(args, timeout=180)
+
+    def erc8004_set_metadata(
+        self, agent_id: str, key: str, value: str, chain: str, password: str | None,
+    ) -> TwakResult:
+        args = [
+            "erc8004", "set-metadata", str(agent_id),
+            "--key", key, "--value", value, "--chain", chain, "--json",
+        ]
+        if password:
+            args += ["--password", password]
+        return self.run(args, timeout=180)

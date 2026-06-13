@@ -55,6 +55,7 @@ class Settings:
     bnb_agent_private_key: str = ""
     bnb_rpc_url: str = ""
     bnb_anchoring_enabled: bool = False
+    anchor_chain: str = "bsc"   # erc8004 deployments: "bsc" (mainnet) | "bsctestnet"
     env: dict[str, str] = field(default_factory=dict)
 
     @property
@@ -121,5 +122,6 @@ def load_settings(mode: str | None = None) -> Settings:
         bnb_agent_private_key=os.getenv("BNB_AGENT_PRIVATE_KEY", ""),
         bnb_rpc_url=os.getenv("BNB_RPC_URL", ""),
         bnb_anchoring_enabled=_env_bool("BNB_ANCHORING_ENABLED"),
+        anchor_chain=os.getenv("GLASSBOX_ANCHOR_CHAIN", "bsc"),
         env=dict(os.environ),
     )

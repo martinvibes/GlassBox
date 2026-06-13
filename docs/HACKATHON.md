@@ -34,8 +34,22 @@ need confirming directly on the page — treat rulebook values as conservative u
   `https://mcp.coinmarketcap.com/mcp`, header `X-CMC-MCP-API-KEY`; x402 pay-per-call path.
 - **TWAK** — `npm i -g @trustwallet/cli`; `twak serve` exposes MCP tools; agent-wallet
   autonomous mode (no per-tx approval); keys in `~/.twak/`.
-- **BNB AI Agent SDK** — ERC-8004 identity + agent commerce. ⚠️ **testnet-only** right
-  now (mainnet contracts not deployed). Use for identity/anchoring, not execution.
+- **BNB AI Agent SDK** — ERC-8004 identity + agent commerce. NOTE (corrected via the
+  installed `twak` CLI v0.19.1): the **ERC-8004 registry is deployed on `bsc` mainnet
+  AND `bsctestnet`** — usable now via `twak erc8004`. The earlier "testnet-only" caveat
+  referred to the standalone bnbagent Python SDK; we use the TWAK CLI's erc8004 instead.
+
+## Verified from the installed TWAK CLI (v0.19.1)
+- BSC chain key is **`bsc`** (eip155). `twak chains` lists 25+ chains.
+- **`twak compete register` / `twak compete status`** — the hackathon registration is a
+  first-class CLI command ("BNB HACK: AI TRADING AGENT EDITION — register and check status (BSC)").
+  It has a registration deadline (check via `compete status`).
+- `twak swap <amt> <from> <to> --chain bsc --slippage <pct> [--usd <amt>] [--quote-only] [--json]`.
+- Assets: `c714_t0x<contract>` for BEP-20 (714 = BSC). Tokens in the registry may resolve by symbol.
+- `twak wallet portfolio --chains bsc --json` → live USD balances (for reconciliation).
+- `twak auth setup --api-key <id> --api-secret <secret>` is non-interactive.
+- All data/trade commands require API credentials (portal.trustwallet.com). Wallet password
+  stored in OS keychain by default.
 
 ## Strategic read (why "GlassBox")
 A 7-day, capped-drawdown, low-min-trade live PnL contest rewards **survival over alpha**:

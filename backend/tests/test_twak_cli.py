@@ -7,26 +7,27 @@ from __future__ import annotations
 import pytest
 
 from glassbox.config import TokenInfo
-from glassbox.execution.twak_cli import bsc_asset_id, build_swap_args
+from glassbox.execution.twak_cli import bsc_token_ref, build_swap_args
 
 USDT = TokenInfo("USDT", "0x55d398326f99059fF775485246999027B3197955", 18, True)
 WBNB = TokenInfo("WBNB", "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", 18, False)
 
 
-def test_bsc_asset_id_format():
-    assert bsc_asset_id(WBNB) == "c714_t0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
-    assert bsc_asset_id(USDT).startswith("c714_t0x")
+def test_bsc_token_ref_is_plain_address():
+    # confirmed against twak v0.19.1: --chain bsc takes the plain contract address
+    assert bsc_token_ref(WBNB) == "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
+    assert bsc_token_ref(USDT).startswith("0x")
 
 
-def test_bsc_asset_id_rejects_bad_address():
+def test_bsc_token_ref_rejects_bad_address():
     bad = TokenInfo("X", "not-an-address", 18, False)
     with pytest.raises(ValueError):
-        bsc_asset_id(bad)
+        bsc_token_ref(bad)
 
 
 def test_build_swap_args_buy_quote_only_has_no_password():
     args = build_swap_args(
-        amount=100.0, from_asset=bsc_asset_id(USDT), to_asset=bsc_asset_id(WBNB),
+        amount=100.0, from_asset=bsc_token_ref(USDT), to_asset=bsc_token_ref(WBNB),
         slippage_pct=0.8, quote_only=True, password=None,
     )
     assert args[0] == "swap"
@@ -39,7 +40,7 @@ def test_build_swap_args_buy_quote_only_has_no_password():
 
 def test_build_swap_args_execute_includes_password():
     args = build_swap_args(
-        amount=0.5, from_asset=bsc_asset_id(WBNB), to_asset=bsc_asset_id(USDT),
+        amount=0.5, from_asset=bsc_token_ref(WBNB), to_asset=bsc_token_ref(USDT),
         slippage_pct=1.0, quote_only=False, password="hunter2",
     )
     assert "--quote-only" not in args

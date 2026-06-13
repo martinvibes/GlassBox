@@ -23,9 +23,21 @@ from __future__ import annotations
 import hashlib
 
 from glassbox.config import Settings
-from glassbox.execution.twak_cli import TwakCLI, bsc_asset_id
+from glassbox.execution.twak_cli import TwakCLI, bsc_token_ref
 from glassbox.models import Action, ExecutionResult, GateDecision, GateVerdict, Portfolio
 from glassbox.storage import state as state_store
+
+
+def _parse_amount(value) -> float:
+    """Parse a TWAK amount field like "0.16314 WBNB" or a bare number → float."""
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).strip().split()[0])
+    except (ValueError, IndexError):
+        return 0.0
 
 # Paper-trading cost model (tune to BSC reality).
 _PAPER_FEE_BPS = 25      # ~0.25% round-trip-ish per leg (PancakeSwap + gas proxy)
@@ -79,8 +91,8 @@ class Executor:
                 error=f"token {sym} or base {base} missing from allowlist",
             )
 
-        base_asset = bsc_asset_id(self.s.allowlist[base])
-        sym_asset = bsc_asset_id(self.s.allowlist[sym])
+        base_asset = bsc_token_ref(self.s.allowlist[base])
+        sym_asset = bsc_token_ref(self.s.allowlist[sym])
         slippage_pct = self.s.rulebook["limits"]["max_slippage_bps"] / 100.0
         pw = self.s.twak_wallet_password or None
 
@@ -104,6 +116,13 @@ class Executor:
                 ok=False, action=decision.action, symbol=sym, venue="pancakeswap",
                 error=f"quote failed: {quote.error}",
             )
+        # quote shape: {input, output, minReceived, provider, priceImpact}
+        impact = _parse_amount(quote.raw.get("priceImpact"))
+        if impact > slippage_pct:
+            return ExecutionResult(
+                ok=False, action=decision.action, symbol=sym, venue="pancakeswap",
+                error=f"price impact {impact}% exceeds slippage cap {slippage_pct}%",
+            )
 
         # 2. execute the real swap (signs locally)
         res = self.cli.swap(amount, from_asset, to_asset, slippage_pct,
@@ -121,27 +140,29 @@ class Executor:
     ) -> ExecutionResult:
         """Map the CLI's JSON swap result into an ExecutionResult.
 
-        TODO(confirm): field names below are defensive guesses — confirm against
-        real `twak swap --json` output once you have keys, and tighten the mapping.
+        Confirmed quote/execute shape (twak v0.19.1):
+            {"input":"100 USDT","output":"0.16314 WBNB","minReceived":"0.1618 WBNB",
+             "provider":"LiquidMesh","priceImpact":"0"}
+        Execute adds a tx hash field. We parse defensively across likely names.
+
+        NOTE: in live mode the portfolio is reconciled from on-chain balances
+        (twak wallet portfolio) by the orchestrator — we do NOT mutate it here.
         """
         tx_hash = (
-            raw.get("txHash") or raw.get("tx_hash") or raw.get("transactionHash")
-            or raw.get("hash") or raw.get("id")
+            raw.get("txHash") or raw.get("transactionHash") or raw.get("hash")
+            or raw.get("tx") or raw.get("id")
         )
-        # amount of the token received (BUY) or base received (SELL)
-        to_amount = (
-            raw.get("toAmount") or raw.get("amountOut") or raw.get("toAmountMin") or 0.0
-        )
-        # NOTE: in live mode the portfolio is reconciled from on-chain balances
-        # (twak wallet balance) by the orchestrator — we do NOT mutate it here.
+        # "output" is what the wallet receives: token (BUY) or base currency (SELL)
+        out_qty = _parse_amount(raw.get("output"))
         mark = prices_usd.get(sym, 0.0)
+
         if decision.action == Action.BUY:
-            filled_qty = float(to_amount) if to_amount else 0.0
+            filled_qty = out_qty                          # token received
             notional = decision.approved_notional_usd
             fill_price = (notional / filled_qty) if filled_qty else mark
         else:
-            filled_qty = amount
-            proceeds = float(to_amount) if to_amount else filled_qty * mark
+            filled_qty = amount                           # token sold
+            proceeds = out_qty if out_qty else filled_qty * mark   # base received
             notional = proceeds
             fill_price = (proceeds / filled_qty) if filled_qty else mark
 

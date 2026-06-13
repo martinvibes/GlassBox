@@ -24,15 +24,16 @@ from dataclasses import dataclass
 
 from glassbox.config import Settings, TokenInfo
 
-BSC_COIN_ID = "714"  # Trust Wallet coin id for BNB Smart Chain
+def bsc_token_ref(token: TokenInfo) -> str:
+    """Token reference the `twak swap` CLI accepts with `--chain bsc`.
 
-
-def bsc_asset_id(token: TokenInfo) -> str:
-    """Trust Wallet asset id for a BEP-20 token on BSC: c714_t0x<contract>."""
+    Confirmed against twak v0.19.1: a plain BEP-20 contract address works
+    (e.g. `twak swap 100 0x55d3...955 0xbb4C...95c --chain bsc`). The `c714_t0x`
+    asset-id form is NOT recognized for BSC."""
     addr = token.address
     if not addr.lower().startswith("0x"):
         raise ValueError(f"bad token address for {token.symbol}: {addr!r}")
-    return f"c{BSC_COIN_ID}_t{addr}"
+    return addr
 
 
 def build_swap_args(

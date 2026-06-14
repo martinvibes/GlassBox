@@ -63,6 +63,8 @@ export async function GET() {
     minConviction: eff.minConviction,
     maxTradesPerDay: eff.maxTradesPerDay,
     paused: control.paused,
+    agentMode: control.mode,
+    dca: control.dca ?? null,
     regime,
     fearGreed: latest?.signals.fear_greed ?? null,
     equitySeries,

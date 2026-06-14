@@ -88,13 +88,25 @@ export async function readRulebookCaps(): Promise<{
   };
 }
 
-export async function readControl(): Promise<{ paused: boolean }> {
+export interface ControlState {
+  paused: boolean;
+  mode: "autonomous" | "dca" | "manual";
+  dca?: { token?: string; amount_usd?: number; interval_hours?: number };
+}
+
+export async function readControl(): Promise<ControlState> {
   const raw = await readText(path.join(DATA, "control.json"));
-  if (!raw) return { paused: false };
+  const dflt: ControlState = { paused: false, mode: "autonomous" };
+  if (!raw) return dflt;
   try {
-    return { paused: !!JSON.parse(raw).paused };
+    const j = JSON.parse(raw);
+    return {
+      paused: !!j.paused,
+      mode: j.mode === "dca" || j.mode === "manual" ? j.mode : "autonomous",
+      dca: j.dca ?? undefined,
+    };
   } catch {
-    return { paused: false };
+    return dflt;
   }
 }
 
@@ -113,10 +125,19 @@ async function writeData(file: string, obj: unknown): Promise<void> {
   await fs.writeFile(path.join(DATA, file), JSON.stringify(obj, null, 2));
 }
 
-export async function writeControl(obj: { paused: boolean }): Promise<void> {
+export async function writeControl(obj: ControlState): Promise<void> {
   await writeData("control.json", obj);
 }
 
 export async function writeMandate(obj: Record<string, number>): Promise<void> {
   await writeData("mandate.json", obj);
+}
+
+export async function writeCommand(obj: {
+  action: string;
+  symbol?: string;
+  size_pct?: number;
+  ts: string;
+}): Promise<void> {
+  await writeData("command.json", obj);
 }

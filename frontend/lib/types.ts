@@ -92,6 +92,8 @@ export interface StatePayload {
   minConviction: number;
   maxTradesPerDay: number;
   paused: boolean;
+  agentMode: "autonomous" | "dca" | "manual";
+  dca: { token?: string; amount_usd?: number; interval_hours?: number } | null;
   regime: Regime;
   fearGreed: number | null;
   equitySeries: { t: number; v: number }[];

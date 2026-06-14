@@ -29,7 +29,16 @@ export default function Landing({ background }: { background?: React.ReactNode }
     <main className="relative z-10 overflow-hidden">
       {/* ───────────────────────── HERO ───────────────────────── */}
       <section className="relative">
-        {background ?? <Spotlight className="!h-[120%]" />}
+        {/* background, contained to the hero's upper-middle and faded out */}
+        <div
+          className="absolute inset-x-0 top-0 h-[860px] overflow-hidden pointer-events-none"
+          style={{
+            maskImage: "radial-gradient(120% 78% at 50% 34%, #000 38%, transparent 82%)",
+            WebkitMaskImage: "radial-gradient(120% 78% at 50% 34%, #000 38%, transparent 82%)",
+          }}
+        >
+          {background ?? <Spotlight />}
+        </div>
         <div className="relative max-w-[1100px] mx-auto px-5 md:px-8 pt-24 md:pt-32 pb-16 text-center">
           <div
             className="anim anim-fade inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 hairline mb-8"

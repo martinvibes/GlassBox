@@ -1,5 +1,6 @@
 "use client";
-import * as faceapi from "face-api.js";
+// face-api.js is lazy-loaded only when enableWebcam is true (keeps it out of the
+// default bundle — the landing uses GridScan with the webcam off).
 import { BloomEffect, ChromaticAberrationEffect, EffectComposer, EffectPass, RenderPass } from "postprocessing";
 import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
@@ -636,6 +637,7 @@ export const GridScan: React.FC<GridScanProps> = ({
     let canceled = false;
     const load = async () => {
       try {
+        const faceapi = await import("face-api.js");
         await Promise.all([
           faceapi.nets.tinyFaceDetector.loadFromUri(modelsPath),
           faceapi.nets.faceLandmark68TinyNet.loadFromUri(modelsPath),
@@ -659,6 +661,7 @@ export const GridScan: React.FC<GridScanProps> = ({
       if (!enableWebcam || !modelsReady) return;
       const video = videoRef.current;
       if (!video) return;
+      const faceapi = await import("face-api.js");
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({

@@ -88,6 +88,10 @@ export interface StatePayload {
   drawdownPct: number;
   internalCeilingPct: number;
   competitionCapPct: number;
+  maxPositionPct: number;
+  minConviction: number;
+  maxTradesPerDay: number;
+  paused: boolean;
   regime: Regime;
   fearGreed: number | null;
   equitySeries: { t: number; v: number }[];

@@ -3,7 +3,8 @@ import { motion } from "framer-motion";
 import { usePolling } from "@/lib/usePolling";
 import TopBar from "@/components/TopBar";
 import DrawdownGauge from "@/components/DrawdownGauge";
-import PriceChart from "@/components/PriceChart";
+import TradingViewChart from "@/components/TradingViewChart";
+import AgentConsole from "@/components/AgentConsole";
 import EquityChart from "@/components/EquityChart";
 import ReasoningFeed from "@/components/ReasoningFeed";
 import Positions from "@/components/Positions";
@@ -44,27 +45,47 @@ export default function Page() {
         cycles={data?.cycles ?? 0}
       />
 
-      {/* HERO */}
+      {/* TRADE SURFACE: chart + agent console (the autonomous "order panel") */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-4 mt-6">
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.1 }}
+          className="lg:col-span-8 lg:h-[560px]"
+        >
+          <TradingViewChart />
+        </motion.div>
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.2 }}
+          className="lg:col-span-4 lg:h-[560px]"
+        >
+          <AgentConsole />
+        </motion.div>
+      </section>
+
+      {/* PERFORMANCE: survival gauge + equity headline + stats */}
+      <section className="grid grid-cols-1 lg:grid-cols-12 gap-4 mt-4">
         <motion.div
           initial={{ opacity: 0, scale: 0.97 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.7, ease: "easeOut" }}
-          className="glass lg:col-span-5 p-6 flex flex-col items-center justify-center relative overflow-hidden"
+          transition={{ duration: 0.6, delay: 0.15 }}
+          className="glass lg:col-span-4 p-6 flex flex-col items-center justify-center relative overflow-hidden"
         >
           <div className="absolute top-5 left-6 label">survival monitor</div>
           <DrawdownGauge dd={dd} ceiling={data?.internalCeilingPct ?? 12} cap={data?.competitionCapPct ?? 30} />
           <p className="text-[12px] text-[var(--color-muted)] text-center mt-3 max-w-[300px] leading-snug">
-            The agent auto-flattens far inside the disqualification line.
+            Auto-flattens far inside the disqualification line.
             <span className="text-[var(--color-mint)]"> Survival is the alpha.</span>
           </p>
         </motion.div>
 
-        <div className="lg:col-span-7 flex flex-col gap-4">
+        <div className="lg:col-span-8 flex flex-col gap-4">
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.1 }}
+            transition={{ duration: 0.6, delay: 0.2 }}
             className="glass p-6 flex items-end justify-between flex-wrap gap-4"
           >
             <div>
@@ -87,60 +108,34 @@ export default function Page() {
           </motion.div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <StatTile label="fear & greed" value={fng ?? "—"} sub={fngLabel(fng)} accent="var(--color-amber)" delay={0.15} />
-            <StatTile label="high-water" value={money(hwm, 0)} sub="peak equity" delay={0.2} />
-            <StatTile
-              label="cycles"
-              value={data?.cycles ?? 0}
-              sub="decisions logged"
-              accent="var(--color-cyan)"
-              delay={0.25}
-            />
+            <StatTile label="fear & greed" value={fng ?? "—"} sub={fngLabel(fng)} accent="var(--color-amber)" delay={0.25} />
+            <StatTile label="high-water" value={money(hwm, 0)} sub="peak equity" delay={0.3} />
+            <StatTile label="cycles" value={data?.cycles ?? 0} sub="decisions logged" accent="var(--color-cyan)" delay={0.35} />
             <StatTile
               label="posture"
               value={<span className="text-[18px]">{(data?.latest?.decision.posture ?? "—").replace("_", "-")}</span>}
               sub="gate stance"
-              delay={0.3}
+              delay={0.4}
             />
           </div>
         </div>
       </section>
 
-      {/* CHARTS */}
+      {/* FEED + POSITIONS */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-4 mt-4">
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.2 }}
-          className="lg:col-span-8 min-h-[360px]"
-        >
-          <PriceChart />
-        </motion.div>
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.3 }}
-          className="lg:col-span-4 min-h-[360px]"
-        >
-          <EquityChart series={data?.equitySeries ?? []} start={start} />
-        </motion.div>
-      </section>
-
-      {/* FEED + POSITIONS */}
-      <section className="grid grid-cols-1 lg:grid-cols-12 gap-4 mt-4 mb-8">
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.35 }}
-          className="lg:col-span-7 h-[460px]"
+          className="lg:col-span-8 h-[440px]"
         >
           <ReasoningFeed />
         </motion.div>
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.4 }}
-          className="lg:col-span-5"
+          transition={{ duration: 0.6, delay: 0.35 }}
+          className="lg:col-span-4"
         >
           <Positions
             portfolio={data?.portfolio ?? null}
@@ -148,6 +143,18 @@ export default function Page() {
             wallet={data?.wallet ?? null}
             agentId={data?.agentId ?? null}
           />
+        </motion.div>
+      </section>
+
+      {/* EQUITY CURVE — full width */}
+      <section className="mt-4 mb-8">
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.4 }}
+          className="h-[280px]"
+        >
+          <EquityChart series={data?.equitySeries ?? []} start={start} />
         </motion.div>
       </section>
 

@@ -64,11 +64,14 @@ export async function readEnv(): Promise<Record<string, string>> {
   return out;
 }
 
-// Pull a couple of values from the YAML rulebook without a YAML dep.
+// Pull values from the YAML rulebook without a YAML dep.
 export async function readRulebookCaps(): Promise<{
   competitionCapPct: number;
   internalCeilingPct: number;
   startEquity: number;
+  maxPositionPct: number;
+  minConviction: number;
+  maxTradesPerDay: number;
 }> {
   const raw = await readText(path.join(BACKEND, "rules", "rulebook.yaml"));
   const num = (re: RegExp, dflt: number) => {
@@ -79,5 +82,41 @@ export async function readRulebookCaps(): Promise<{
     competitionCapPct: num(/competition_cap_pct:\s*([\d.]+)/, 30),
     internalCeilingPct: num(/internal_ceiling_pct:\s*([\d.]+)/, 12),
     startEquity: num(/starting_equity_usd:\s*([\d.]+)/, 1000),
+    maxPositionPct: num(/max_position_pct:\s*([\d.]+)/, 25),
+    minConviction: num(/min_score_to_enter:\s*([\d.]+)/, 0.62),
+    maxTradesPerDay: num(/max_trades_per_day:\s*([\d.]+)/, 6),
   };
+}
+
+export async function readControl(): Promise<{ paused: boolean }> {
+  const raw = await readText(path.join(DATA, "control.json"));
+  if (!raw) return { paused: false };
+  try {
+    return { paused: !!JSON.parse(raw).paused };
+  } catch {
+    return { paused: false };
+  }
+}
+
+export async function readMandate(): Promise<Record<string, number>> {
+  const raw = await readText(path.join(DATA, "mandate.json"));
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+async function writeData(file: string, obj: unknown): Promise<void> {
+  await fs.mkdir(DATA, { recursive: true });
+  await fs.writeFile(path.join(DATA, file), JSON.stringify(obj, null, 2));
+}
+
+export async function writeControl(obj: { paused: boolean }): Promise<void> {
+  await writeData("control.json", obj);
+}
+
+export async function writeMandate(obj: Record<string, number>): Promise<void> {
+  await writeData("mandate.json", obj);
 }

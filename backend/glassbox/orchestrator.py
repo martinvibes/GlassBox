@@ -20,6 +20,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 
+from glassbox import control
 from glassbox.config import Settings, load_settings
 from glassbox.execution.twak import Executor
 from glassbox.models import (
@@ -61,6 +62,10 @@ class Orchestrator:
         now = _now()
         cycle_id = self.audit.next_cycle_id()
 
+        # 0. live operator controls from the dashboard (read fresh each cycle)
+        control.apply_mandate(self.s.rulebook, control.read_mandate(self.s.data_dir))
+        paused = bool(control.read_control(self.s.data_dir).get("paused", False))
+
         # 1. perceive
         signals: Signals = self.perception.fetch()
 
@@ -77,6 +82,14 @@ class Orchestrator:
             probe = self._activity_probe(signals)
             if probe is not None:
                 proposal = probe
+
+        # 2c. operator pause — stand down (overrides any proposal/probe)
+        if paused:
+            proposal = TradeProposal(
+                action=Action.HOLD, conviction=0.0,
+                rationale="paused by operator from the console — standing down.",
+                proposed_regime=signals.regime, source="operator",
+            )
 
         # 3. GATE (the only authority over execution)
         decision = risk_gate.evaluate(

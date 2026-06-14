@@ -5,6 +5,8 @@ import {
   readAgentId,
   readEnv,
   readRulebookCaps,
+  readControl,
+  readMandate,
 } from "@/lib/backend";
 import type { Regime, StatePayload } from "@/lib/types";
 
@@ -12,13 +14,23 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET() {
-  const [decisions, portfolio, agentId, env, caps] = await Promise.all([
+  const [decisions, portfolio, agentId, env, caps, control, mandate] = await Promise.all([
     readDecisions(),
     readPortfolio(),
     readAgentId(),
     readEnv(),
     readRulebookCaps(),
+    readControl(),
+    readMandate(),
   ]);
+
+  // effective config = rulebook defaults overlaid with the dashboard mandate
+  const eff = {
+    internalCeilingPct: mandate.internal_ceiling_pct ?? caps.internalCeilingPct,
+    maxPositionPct: mandate.max_position_pct ?? caps.maxPositionPct,
+    minConviction: mandate.min_score_to_enter ?? caps.minConviction,
+    maxTradesPerDay: mandate.max_trades_per_day ?? caps.maxTradesPerDay,
+  };
 
   const latest = decisions.length ? decisions[decisions.length - 1] : null;
 
@@ -45,8 +57,12 @@ export async function GET() {
     equity,
     startEquity: caps.startEquity,
     drawdownPct: latest?.drawdown_pct ?? 0,
-    internalCeilingPct: caps.internalCeilingPct,
+    internalCeilingPct: eff.internalCeilingPct,
     competitionCapPct: caps.competitionCapPct,
+    maxPositionPct: eff.maxPositionPct,
+    minConviction: eff.minConviction,
+    maxTradesPerDay: eff.maxTradesPerDay,
+    paused: control.paused,
     regime,
     fearGreed: latest?.signals.fear_greed ?? null,
     equitySeries,

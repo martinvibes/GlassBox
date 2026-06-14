@@ -6,15 +6,15 @@
    ───────────────────────────────────────────────────────────────────────── */
 
 @theme {
-  --color-void: #07080a;
-  --color-ink: #0b0d10;
-  --color-panel: #0e1116;
-  --color-line: rgba(255, 255, 255, 0.07);
-  --color-line-bright: rgba(255, 255, 255, 0.14);
+  --color-void: #08080b;       /* warm near-black */
+  --color-ink: #0c0c10;
+  --color-panel: #0f1014;
+  --color-line: rgba(255, 255, 255, 0.06);
+  --color-line-bright: rgba(255, 255, 255, 0.12);
 
-  --color-fg: #eef1f4;
-  --color-muted: #8b929e;
-  --color-faint: #565d68;
+  --color-fg: #f1f2f4;
+  --color-muted: #8b8f99;
+  --color-faint: #5a5e68;
 
   --color-mint: #4ee6a8;       /* profit / risk-on / safe */
   --color-mint-dim: #1f6f54;
@@ -22,6 +22,7 @@
   --color-amber: #ffb44d;      /* caution / neutral */
   --color-cyan: #57c7ff;       /* data / info */
   --color-violet: #b69bff;     /* accents */
+  --color-champagne: #d8c08c;  /* warm luxury accent (atmosphere) */
 
   --font-display: var(--font-display), Georgia, serif;
   --font-sans: var(--font-sans), system-ui, sans-serif;
@@ -39,12 +40,18 @@ html {
 
 body {
   background:
-    radial-gradient(900px 600px at 78% -10%, rgba(78, 230, 168, 0.07), transparent 60%),
-    radial-gradient(800px 700px at 8% 110%, rgba(87, 199, 255, 0.06), transparent 55%),
+    radial-gradient(1100px 720px at 84% -18%, rgba(216, 192, 140, 0.07), transparent 55%),
+    radial-gradient(900px 620px at 8% -8%, rgba(78, 230, 168, 0.055), transparent 52%),
+    radial-gradient(820px 520px at 66% 30%, rgba(216, 192, 140, 0.035), transparent 60%),
+    radial-gradient(760px 520px at 22% 52%, rgba(78, 230, 168, 0.03), transparent 60%),
+    radial-gradient(1000px 820px at 50% 122%, rgba(87, 199, 255, 0.045), transparent 55%),
     var(--color-void);
+  background-attachment: fixed;
   color: var(--color-fg);
   font-family: var(--font-sans);
+  letter-spacing: -0.011em;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   overflow-x: hidden;
 }
@@ -56,7 +63,7 @@ body::before {
   inset: 0;
   z-index: 1;
   pointer-events: none;
-  opacity: 0.035;
+  opacity: 0.028;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
@@ -69,15 +76,24 @@ body::before {
   mask-image: radial-gradient(120% 120% at 50% 0%, #000 30%, transparent 80%);
 }
 
-/* glass panel */
+/* glass panel — frosted, floats over the warm-glow background (Paradyze feel) */
 .glass {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012));
+  background:
+    radial-gradient(130% 130% at 0% 0%, rgba(255, 255, 255, 0.05), transparent 46%),
+    linear-gradient(180deg, rgba(20, 22, 28, 0.55), rgba(12, 13, 18, 0.42));
   border: 1px solid var(--color-line);
-  border-radius: 18px;
-  backdrop-filter: blur(14px);
+  border-radius: 16px;
+  backdrop-filter: blur(18px) saturate(1.15);
+  -webkit-backdrop-filter: blur(18px) saturate(1.15);
   box-shadow:
     0 1px 0 0 rgba(255, 255, 255, 0.05) inset,
-    0 30px 60px -30px rgba(0, 0, 0, 0.8);
+    0 30px 70px -40px rgba(0, 0, 0, 0.95);
+}
+/* tighter inner panel, for nested cards / orderbook rows */
+.panel {
+  background: rgba(255, 255, 255, 0.018);
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
 }
 
 .hairline {

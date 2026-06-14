@@ -5,6 +5,7 @@ import { Eye, ShieldCheck, Layers, ArrowRight, Lock } from "lucide-react";
 import { usePolling } from "@/lib/usePolling";
 import Spotlight from "@/components/Spotlight";
 import LivePreview from "@/components/LivePreview";
+import LogoMarquee from "@/components/LogoMarquee";
 import DrawdownGauge from "@/components/DrawdownGauge";
 import { money, signedPct } from "@/lib/format";
 import type { StatePayload } from "@/lib/types";
@@ -106,14 +107,11 @@ export default function Landing() {
         </motion.div>
       </section>
 
-      {/* ───────────────────────── STACK STRIP ───────────────────────── */}
-      <section className="border-y border-[var(--color-line)] py-7">
-        <div className="max-w-[1100px] mx-auto px-5 md:px-8 flex items-center justify-center gap-8 md:gap-16 flex-wrap">
-          <span className="label">powered by</span>
-          <Wordmark>CoinMarketCap</Wordmark>
-          <Wordmark>Trust Wallet</Wordmark>
-          <Wordmark>BNB Chain</Wordmark>
-          <Wordmark>Privy</Wordmark>
+      {/* ───────────────────────── STACK MARQUEE ───────────────────────── */}
+      <section className="border-y border-[var(--color-line)] py-8">
+        <div className="text-center label mb-5">powered by</div>
+        <div className="max-w-[860px] mx-auto px-5">
+          <LogoMarquee />
         </div>
       </section>
 
@@ -210,9 +208,6 @@ function Stat({ k, v, c }: { k: string; v: string; c?: string }) {
 }
 function Dot() {
   return <span className="h-8 w-px bg-[var(--color-line)]" />;
-}
-function Wordmark({ children }: { children: React.ReactNode }) {
-  return <span className="text-[16px] md:text-[19px] text-[var(--color-muted)] tracking-tight">{children}</span>;
 }
 
 function Feature({

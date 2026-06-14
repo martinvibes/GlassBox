@@ -32,6 +32,23 @@ def read_mandate(data_dir: Path) -> dict[str, Any]:
     return _read_json(Path(data_dir) / "mandate.json")
 
 
+# ── manual command queue (frontend-written, backend-consumed) ───────────────
+def read_command(data_dir: Path) -> dict[str, Any]:
+    """A one-shot manual action: {action, symbol, size_pct, ts}."""
+    return _read_json(Path(data_dir) / "command.json")
+
+
+# ── backend-owned runtime state (DCA timer, last-consumed command) ──────────
+def read_runtime(data_dir: Path) -> dict[str, Any]:
+    return _read_json(Path(data_dir) / "agent_runtime.json")
+
+
+def write_runtime(data_dir: Path, obj: dict[str, Any]) -> None:
+    p = Path(data_dir) / "agent_runtime.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(obj))
+
+
 def apply_mandate(rulebook: dict[str, Any], mandate: dict[str, Any]) -> None:
     """Layer the dashboard's risk mandate over the rulebook in place."""
     try:

@@ -165,29 +165,35 @@ def _evaluate(
         base.reasons.append(f"BLOCK: no valid mark price for {proposal.symbol}")
         return base
 
-    # 4c. conviction floor (higher bar to ADD to existing position)
+    # Directed trades (user DCA / manual) skip the AI gates (conviction, regime
+    # posture, cooldown) — but ALL hard safety below (drawdown breaker above,
+    # sizing caps, allowlist, slippage, daily cap, cash) still applies.
+    directed = bool(getattr(proposal, "directed", False))
     holding = proposal.symbol in portfolio.positions
-    floor = conviction["min_score_to_add"] if holding else conviction["min_score_to_enter"]
-    if proposal.conviction < floor:
-        base.reasons.append(
-            f"BLOCK: conviction {proposal.conviction:.2f} < floor {floor} "
-            f"({'add' if holding else 'enter'})"
-        )
-        return base
 
-    # 4d. regime posture — risk_off means stay flat, full stop
+    # 4c. conviction floor (higher bar to ADD to existing position)
+    if not directed:
+        floor = conviction["min_score_to_add"] if holding else conviction["min_score_to_enter"]
+        if proposal.conviction < floor:
+            base.reasons.append(
+                f"BLOCK: conviction {proposal.conviction:.2f} < floor {floor} "
+                f"({'add' if holding else 'enter'})"
+            )
+            return base
+
+    # 4d. regime posture — risk_off means stay flat (AI trades only)
     posture_max_gross = float(posture.get("max_gross_exposure_pct", 0.0))
-    if posture_max_gross <= 0.0:
+    if not directed and posture_max_gross <= 0.0:
         base.reasons.append(f"BLOCK: posture '{posture_name}' forbids new exposure")
         return base
 
-    # 4e. trade-frequency + cooldown
+    # 4e. trade-frequency (always) + cooldown (AI trades only)
     if state.trades_today >= limits["max_trades_per_day"]:
         base.reasons.append(
             f"BLOCK: daily trade cap reached ({state.trades_today}/{limits['max_trades_per_day']})"
         )
         return base
-    if state.last_trade_ts is not None:
+    if not directed and state.last_trade_ts is not None:
         gap_min = (now - state.last_trade_ts).total_seconds() / 60.0
         if gap_min < limits["trade_cooldown_minutes"]:
             base.reasons.append(
@@ -225,14 +231,14 @@ def _evaluate(
         )
         size_pct = room_in_position
 
-    # cap by remaining gross exposure room (min of rulebook + posture)
+    # cap by remaining gross exposure room. AI trades respect the regime posture;
+    # directed (DCA/manual) trades use the rulebook cap (posture-independent).
     gross_pct = (portfolio.gross_exposure_usd(prices) / equity * 100.0) if equity > 0 else 0.0
-    gross_cap = min(sizing["max_gross_exposure_pct"], posture_max_gross)
+    gross_cap = sizing["max_gross_exposure_pct"] if directed else min(sizing["max_gross_exposure_pct"], posture_max_gross)
     room_in_gross = max(0.0, gross_cap - gross_pct)
     if size_pct > room_in_gross:
-        reasons.append(
-            f"clamp {size_pct:.1f}%→{room_in_gross:.1f}% (gross cap {gross_cap:.0f}% under '{posture_name}')"
-        )
+        label = "rulebook" if directed else f"under '{posture_name}'"
+        reasons.append(f"clamp {size_pct:.1f}%→{room_in_gross:.1f}% (gross cap {gross_cap:.0f}% {label})")
         size_pct = room_in_gross
 
     # cap by available cash

@@ -99,7 +99,8 @@ class TradeProposal(BaseModel):
     conviction: float = 0.0                         # 0..1 confidence
     rationale: str = ""                             # human-readable reasoning (audited)
     proposed_regime: Regime = Regime.UNKNOWN
-    source: str = "heuristic"                       # llm | heuristic
+    source: str = "heuristic"                       # llm | heuristic | dca | manual | operator
+    directed: bool = False                           # user-directed (DCA/manual): skip AI gates, keep hard safety
 
 
 # ── risk gate ────────────────────────────────────────────────────────────

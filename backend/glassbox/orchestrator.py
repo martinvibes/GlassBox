@@ -63,33 +63,39 @@ class Orchestrator:
         cycle_id = self.audit.next_cycle_id()
 
         # 0. live operator controls from the dashboard (read fresh each cycle)
+        ctrl = control.read_control(self.s.data_dir)
         control.apply_mandate(self.s.rulebook, control.read_mandate(self.s.data_dir))
-        paused = bool(control.read_control(self.s.data_dir).get("paused", False))
+        paused = bool(ctrl.get("paused", False))
+        mode = ctrl.get("mode", "autonomous")
+        runtime = control.read_runtime(self.s.data_dir)
 
         # 1. perceive
         signals: Signals = self.perception.fetch()
+        equity = self.portfolio.equity_usd(signals.prices_usd)
 
-        # 2. reason (proposal only)
-        proposal: TradeProposal = self.reasoner.propose(signals, self.portfolio)
-
-        # 2b. inactivity guard — if the competition's daily-activity floor isn't met
-        #     and the model wants to HOLD, downgrade to a tiny keep-alive probe so we
-        #     never get DQ'd for inactivity (only when a sane setup exists).
-        if (
-            proposal.action == Action.HOLD
-            and risk_gate.needs_activity_trade(self.risk_state, self.s.rulebook, now)
-        ):
-            probe = self._activity_probe(signals)
-            if probe is not None:
-                proposal = probe
-
-        # 2c. operator pause — stand down (overrides any proposal/probe)
+        # 2. decide the proposal by mode (the LLM proposes only in autonomous mode;
+        #    DCA & manual are user-directed and bypass AI gates but keep hard safety)
         if paused:
             proposal = TradeProposal(
                 action=Action.HOLD, conviction=0.0,
                 rationale="paused by operator from the console — standing down.",
                 proposed_regime=signals.regime, source="operator",
             )
+        elif mode == "manual":
+            proposal, runtime = self._manual_proposal(signals, equity, runtime)
+        elif mode == "dca":
+            proposal, runtime = self._dca_proposal(ctrl.get("dca", {}), signals, equity, now, runtime)
+        else:  # autonomous
+            proposal = self.reasoner.propose(signals, self.portfolio)
+            if (
+                proposal.action == Action.HOLD
+                and risk_gate.needs_activity_trade(self.risk_state, self.s.rulebook, now)
+            ):
+                probe = self._activity_probe(signals)
+                if probe is not None:
+                    proposal = probe
+
+        control.write_runtime(self.s.data_dir, runtime)
 
         # 3. GATE (the only authority over execution)
         decision = risk_gate.evaluate(
@@ -153,6 +159,87 @@ class Orchestrator:
             rationale="activity-floor keep-alive probe (tiny, by design) to avoid inactivity DQ.",
             proposed_regime=signals.regime, source="activity_floor",
         )
+
+    # ── manual mode: one-shot user command (buy/sell/flatten), gated ────────
+    def _manual_proposal(self, signals, equity, runtime):
+        cmd = control.read_command(self.s.data_dir)
+        ts = cmd.get("ts")
+        hold = TradeProposal(
+            action=Action.HOLD, conviction=0.0, source="manual",
+            rationale="manual mode — awaiting a command from the console.",
+            proposed_regime=signals.regime,
+        )
+        if not ts or ts == runtime.get("command_last_ts"):
+            return hold, runtime  # nothing new to do
+
+        runtime["command_last_ts"] = ts
+        action = str(cmd.get("action", "")).lower()
+        symbol = str(cmd.get("symbol", "")).upper()
+
+        if action == "flatten":
+            if not self.portfolio.positions:
+                return hold, runtime
+            sym = max(
+                self.portfolio.positions,
+                key=lambda s: self.portfolio.positions[s].value_usd(
+                    signals.prices_usd.get(s, self.portfolio.positions[s].avg_price_usd)
+                ),
+            )
+            return TradeProposal(
+                action=Action.SELL, symbol=sym, size_pct=100.0, conviction=1.0, directed=True,
+                rationale="manual FLATTEN from console — closing largest position.",
+                proposed_regime=signals.regime, source="manual",
+            ), runtime
+        if action == "sell":
+            return TradeProposal(
+                action=Action.SELL, symbol=symbol, conviction=1.0, directed=True,
+                rationale=f"manual SELL {symbol} from console.",
+                proposed_regime=signals.regime, source="manual",
+            ), runtime
+        if action == "buy":
+            size_pct = float(cmd.get("size_pct", 0.0))
+            return TradeProposal(
+                action=Action.BUY, symbol=symbol, size_pct=size_pct, conviction=1.0, directed=True,
+                rationale=f"manual BUY {symbol} (~{size_pct:.1f}% equity) from console.",
+                proposed_regime=signals.regime, source="manual",
+            ), runtime
+        return hold, runtime
+
+    # ── DCA mode: recurring scheduled buy, gated ────────────────────────────
+    def _dca_proposal(self, dca, signals, equity, now, runtime):
+        token = str(dca.get("token", "")).upper()
+        amount = float(dca.get("amount_usd", 0) or 0)
+        interval_h = float(dca.get("interval_hours", 24) or 24)
+        hold = TradeProposal(
+            action=Action.HOLD, conviction=0.0, source="dca",
+            rationale=f"DCA armed — next ${amount:.0f} buy of {token or '—'} pending interval.",
+            proposed_regime=signals.regime,
+        )
+        if not token or amount <= 0:
+            return TradeProposal(
+                action=Action.HOLD, conviction=0.0, source="dca",
+                rationale="DCA mode — configure a token and amount in the console.",
+                proposed_regime=signals.regime,
+            ), runtime
+
+        last = runtime.get("dca_last_run")
+        due = True
+        if last:
+            try:
+                elapsed_h = (now - datetime.fromisoformat(last)).total_seconds() / 3600.0
+                due = elapsed_h >= interval_h
+            except ValueError:
+                due = True
+        if not due:
+            return hold, runtime
+
+        runtime["dca_last_run"] = now.isoformat()
+        size_pct = (amount / equity * 100.0) if equity > 0 else 0.0
+        return TradeProposal(
+            action=Action.BUY, symbol=token, size_pct=size_pct, conviction=1.0, directed=True,
+            rationale=f"DCA: scheduled ${amount:.0f} buy of {token} (every {interval_h:g}h).",
+            proposed_regime=signals.regime, source="dca",
+        ), runtime
 
     # ── loop ─────────────────────────────────────────────────────────────
     def run_forever(self) -> None:

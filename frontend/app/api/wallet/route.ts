@@ -28,21 +28,34 @@ function hexToNum(hex: string, decimals: number): number {
   return Number(BigInt(hex)) / 10 ** decimals;
 }
 
-async function prices(symbols: string[]): Promise<Record<string, number>> {
-  const ids = symbols.map((s) => CG_IDS[s]).filter(Boolean);
-  if (!ids.length) return {};
+// last-good price cache (survives across requests) so BNB/token USD never flickers
+// to $0 when CoinGecko is slow or rate-limited.
+const priceCache: Record<string, number> = {};
+let priceCacheTs = 0;
+
+async function prices(): Promise<Record<string, number>> {
+  const now = Date.now();
+  if (now - priceCacheTs < 30_000 && Object.keys(priceCache).length) return priceCache;
   try {
+    const ids = [...new Set(Object.values(CG_IDS))].join(",");
     const r = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${[...new Set(ids)].join(",")}&vs_currencies=usd`,
+      `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`,
       { cache: "no-store" }
     );
     const j = await r.json();
-    const out: Record<string, number> = {};
-    for (const [sym, id] of Object.entries(CG_IDS)) out[sym] = j[id]?.usd ?? 0;
-    return out;
+    let got = false;
+    for (const [sym, id] of Object.entries(CG_IDS)) {
+      const v = j?.[id]?.usd;
+      if (typeof v === "number" && v > 0) {
+        priceCache[sym] = v;
+        got = true;
+      }
+    }
+    if (got) priceCacheTs = now;
   } catch {
-    return {};
+    /* keep last-good cache */
   }
+  return priceCache;
 }
 
 export async function GET() {
@@ -55,7 +68,7 @@ export async function GET() {
   }
 
   const addr = address.toLowerCase().replace(/^0x/, "").padStart(64, "0");
-  const px = await prices(Object.keys(CG_IDS));
+  const px = await prices();
 
   // native BNB
   let nativeAmount = 0;

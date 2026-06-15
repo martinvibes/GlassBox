@@ -34,8 +34,8 @@ export default function DeskTabs({
   return (
     <div>
       {/* segmented control */}
-      <div className="flex items-center gap-1 mb-3">
-        <div className="flex gap-1 rounded-full p-1 hairline" style={{ background: "rgba(255,255,255,0.025)" }}>
+      <div className="flex items-center gap-1 mb-3 overflow-x-auto no-scrollbar">
+        <div className="flex gap-1 rounded-full p-1 hairline shrink-0" style={{ background: "rgba(255,255,255,0.025)" }}>
           {TABS.map((t) => {
             const active = tab === t.id;
             return (

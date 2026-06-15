@@ -151,6 +151,18 @@ body::before {
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
+/* indeterminate loading bar (full-width sweep, both directions) */
+@keyframes loadbar-sweep { 0% { left: -35%; } 100% { left: 100%; } }
+.loadbar { position: relative; height: 2px; overflow: hidden; background: rgba(78, 230, 168, 0.08); }
+.loadbar::before {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 35%;
+  background: linear-gradient(90deg, transparent, var(--color-mint), transparent);
+  animation: loadbar-sweep 1.05s ease-in-out infinite;
+}
+
 /* kill number-input spinner arrows */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }

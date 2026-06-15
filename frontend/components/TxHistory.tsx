@@ -6,6 +6,8 @@ import TokenIcon from "./TokenIcon";
 import type { DecisionRecord } from "@/lib/types";
 
 const BASE = "USDT";
+const PAIR: Record<string, string> = { WBNB: "BNB", BTCB: "BTC", ETH: "ETH", SOL: "SOL", CAKE: "CAKE", USDT: "USDT", USDC: "USDC" };
+const pl = (s: string) => PAIR[s] ?? s;
 
 export default function TxHistory() {
   const { data } = usePolling<{ decisions: DecisionRecord[] }>("/api/decisions?limit=80", 6000);
@@ -26,15 +28,16 @@ export default function TxHistory() {
       <div className="flex-1 overflow-y-auto">
         {fills.length === 0 && (
           <div className="px-5 py-10 text-center text-[13px] text-[var(--color-faint)]">
-            No trades yet. Executed swaps will appear here.
+            No trades yet. Executed trades will appear here.
           </div>
         )}
         {fills.map((r) => {
           const e = r.execution!;
-          const isSwap = e.action === "swap";
-          const isBuy = e.action === "buy" || (isSwap && r.decision.from_symbol === BASE);
-          const from = (isSwap ? r.decision.from_symbol : isBuy ? BASE : e.symbol) || BASE;
-          const to = isSwap ? e.symbol : isBuy ? e.symbol : BASE;
+          // convert (token→token utility) vs trade (buy/sell a pair)
+          const isConvert = e.action === "swap" && r.decision.from_symbol !== BASE && e.symbol !== BASE;
+          const isBuy = e.action === "buy" || (e.action === "swap" && r.decision.from_symbol === BASE);
+          const label = isConvert ? "CONVERT" : isBuy ? "BUY" : "SELL";
+          const tradeSym = e.action === "swap" ? (isBuy ? e.symbol : r.decision.from_symbol || e.symbol) : e.symbol;
           const tx = e.tx_hash ?? "";
           const isPaper = tx.startsWith("0xpaper") || e.venue === "paper";
           return (
@@ -43,27 +46,34 @@ export default function TxHistory() {
               className="px-5 py-3.5 border-b border-[var(--color-line)] last:border-0 flex items-center gap-4"
             >
               <span
-                className="tnum text-[11px] px-2 py-0.5 rounded-md shrink-0"
+                className="tnum text-[11px] px-2 py-0.5 rounded-md shrink-0 w-[58px] text-center"
                 style={{
-                  color: isBuy ? "var(--color-mint)" : "var(--color-danger)",
-                  background: isBuy ? "rgba(78,230,168,0.1)" : "rgba(255,93,108,0.1)",
+                  color: isConvert ? "var(--color-cyan)" : isBuy ? "var(--color-mint)" : "var(--color-danger)",
+                  background: isConvert ? "rgba(87,199,255,0.1)" : isBuy ? "rgba(78,230,168,0.1)" : "rgba(255,93,108,0.1)",
                 }}
               >
-                {e.action.toUpperCase()}
+                {label}
               </span>
 
-              <div className="flex items-center gap-1.5 text-[13px] flex-1">
-                <TokenIcon symbol={from} size={18} />
-                <span className="text-[var(--color-fg)]">{from}</span>
-                <ArrowRight size={12} className="text-[var(--color-faint)]" />
-                <TokenIcon symbol={to} size={18} />
-                <span className="text-[var(--color-fg)]">{to}</span>
-              </div>
+              {isConvert ? (
+                <div className="flex items-center gap-1.5 text-[13px] flex-1">
+                  <TokenIcon symbol={r.decision.from_symbol || ""} size={18} />
+                  <span>{pl(r.decision.from_symbol || "")}</span>
+                  <ArrowRight size={12} className="text-[var(--color-faint)]" />
+                  <TokenIcon symbol={e.symbol} size={18} />
+                  <span>{pl(e.symbol)}</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-[13.5px] flex-1">
+                  <TokenIcon symbol={tradeSym} size={20} />
+                  <span>{pl(tradeSym)}<span className="text-[var(--color-faint)]">/{BASE}</span></span>
+                </div>
+              )}
 
               <div className="text-right">
                 <div className="tnum text-[13px]">{money(e.notional_usd)}</div>
                 <div className="tnum text-[10px] text-[var(--color-faint)]">
-                  {e.filled_qty.toLocaleString("en-US", { maximumFractionDigits: 5 })} {e.symbol} @ {money(e.fill_price_usd)}
+                  {e.filled_qty.toLocaleString("en-US", { maximumFractionDigits: 5 })} {pl(e.symbol)} @ {money(e.fill_price_usd)}
                 </div>
               </div>
 

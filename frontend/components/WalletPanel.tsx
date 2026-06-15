@@ -4,6 +4,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { Copy, Check, QrCode, Wallet, ArrowRightLeft, ArrowDownUp } from "lucide-react";
 import { usePolling } from "@/lib/usePolling";
 import { money } from "@/lib/format";
+import { toast } from "@/lib/toast";
 import TokenIcon from "./TokenIcon";
 
 const CONV_TOKENS = [
@@ -35,18 +36,30 @@ export default function WalletPanel() {
   const [cFrom, setCFrom] = useState("USDC");
   const [cTo, setCTo] = useState("USDT");
   const [cPct, setCPct] = useState(100);
-  const [toast, setToast] = useState<string | null>(null);
 
   const convert = async () => {
     if (cFrom === cTo) return;
-    await fetch("/api/control", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paused: false }) });
-    await fetch("/api/command", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "swap", from: cFrom, to: cTo, size_pct: cPct }),
-    });
-    setToast(`Converting ${cl(cFrom)} → ${cl(cTo)}…`);
-    setTimeout(() => setToast(null), 3500);
+    const id = toast.loading(`Converting ${cl(cFrom)} → ${cl(cTo)}…`);
+    try {
+      await fetch("/api/control", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paused: false }) });
+      await fetch("/api/command", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "swap", from: cFrom, to: cTo, size_pct: cPct }) });
+    } catch { toast.update(id, "error", "Network error — try again"); return; }
+    const started = Date.now();
+    while (Date.now() - started < 28000) {
+      await new Promise((r) => setTimeout(r, 1500));
+      try {
+        const st = await fetch("/api/state", { cache: "no-store" }).then((r) => r.json());
+        if (!st.pendingCommand) {
+          const dec = await fetch("/api/decisions?limit=1", { cache: "no-store" }).then((r) => r.json());
+          const rec = dec.decisions?.[0];
+          const e = rec?.execution;
+          if (e?.ok && e.notional_usd > 0) toast.update(id, "success", `Converted · ${money(e.notional_usd)} → ${cl(cTo)}`);
+          else toast.update(id, "error", `Not filled — ${rec?.decision?.reasons?.[0] ?? "rejected"}`);
+          return;
+        }
+      } catch { /* keep waiting */ }
+    }
+    toast.update(id, "info", "Submitted — still processing");
   };
 
   const address = data?.address ?? null;
@@ -180,7 +193,6 @@ export default function WalletPanel() {
                 style={{ background: "var(--color-mint)", color: "#08080b" }}>
                 Convert {cl(cFrom)} → {cl(cTo)}
               </button>
-              {toast && <div className="text-[11px] tnum text-center" style={{ color: "var(--color-mint)" }}>✓ {toast}</div>}
               <p className="text-[10.5px] text-[var(--color-faint)] leading-snug">
                 One-tap convert (e.g. USDC → USDT). Runs through the agent on its next cycle.
               </p>

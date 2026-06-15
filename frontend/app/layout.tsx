@@ -3,6 +3,7 @@ import { Playfair_Display, Hanken_Grotesk, JetBrains_Mono } from "next/font/goog
 import "./globals.css";
 import Nav from "@/components/Nav";
 import Providers from "@/components/Providers";
+import Toaster from "@/components/Toaster";
 
 const display = Playfair_Display({
   weight: ["400", "500", "600", "700"],
@@ -37,6 +38,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Providers>
           <Nav />
           {children}
+          <Toaster />
         </Providers>
       </body>
     </html>

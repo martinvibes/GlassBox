@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { usePolling } from "@/lib/usePolling";
 import { money } from "@/lib/format";
+import { toast } from "@/lib/toast";
 import TokenIcon from "./TokenIcon";
 import type { StatePayload, Action } from "@/lib/types";
 
@@ -47,7 +48,6 @@ export default function AgentConsole() {
   const [paused, setPaused] = useState<boolean | null>(null);
   const [mode, setMode] = useState<Mode>("autonomous");
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
   const [showRisk, setShowRisk] = useState(false);
 
   const [dcaTok, setDcaTok] = useState("WBNB");
@@ -77,12 +77,42 @@ export default function AgentConsole() {
     }
   }, [data, paused]);
 
-  const flash = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 3500);
-  };
   const post = (url: string, body: unknown) =>
     fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+  // submit a manual command, then resolve a loading toast → success / error
+  // based on the real gate outcome on the next cycle.
+  const runAction = async (loadingMsg: string, body: Record<string, unknown>) => {
+    const id = toast.loading(loadingMsg);
+    try {
+      if (paused) { await post("/api/control", { paused: false }); setPaused(false); }
+      const res = await post("/api/command", body);
+      if (!res.ok) { toast.update(id, "error", "Couldn't submit — try again"); return; }
+    } catch { toast.update(id, "error", "Network error — try again"); return; }
+
+    const started = Date.now();
+    while (Date.now() - started < 28000) {
+      await new Promise((r) => setTimeout(r, 1500));
+      try {
+        const st = await fetch("/api/state", { cache: "no-store" }).then((r) => r.json());
+        if (!st.pendingCommand) {
+          const dec = await fetch("/api/decisions?limit=1", { cache: "no-store" }).then((r) => r.json());
+          const rec = dec.decisions?.[0];
+          const e = rec?.execution;
+          const v = rec?.decision?.verdict;
+          if (e?.ok && e.notional_usd > 0) {
+            const act = (e.action ?? "").toUpperCase();
+            toast.update(id, "success", `${act} filled · ${money(e.notional_usd)} of ${label(e.symbol)}`);
+          } else {
+            const why = rec?.decision?.reasons?.[0] ?? "rejected by the gate";
+            toast.update(id, "error", v === "block" ? `Blocked — ${why}` : `Not filled — ${why}`);
+          }
+          return;
+        }
+      } catch { /* keep waiting */ }
+    }
+    toast.update(id, "info", "Submitted — still processing");
+  };
 
   const switchMode = async (next: Mode) => {
     setMode(next);
@@ -93,25 +123,20 @@ export default function AgentConsole() {
     setBusy(true);
     const next = !paused;
     setPaused(next);
-    try { await post("/api/control", { paused: next }); } finally { setBusy(false); }
+    try {
+      await post("/api/control", { paused: next });
+      toast.success(next ? "Agent paused" : "Agent resumed");
+    } finally { setBusy(false); }
   };
   const armDca = async () => {
     await post("/api/control", { mode: "dca", paused: false, dca: { token: dcaTok, amount_usd: dcaAmt, interval_hours: dcaInt } });
     setPaused(false);
-    flash(`DCA armed · $${dcaAmt} ${label(dcaTok)} every ${dcaInt}h`);
+    toast.success(`DCA armed · buy ${label(dcaTok)} $${dcaAmt} every ${dcaInt}h`);
   };
   const sendCommand = async (action: string, symbol?: string, size_pct?: number) => {
     if (mode !== "manual") await switchMode("manual");
-    if (paused) { await post("/api/control", { paused: false }); setPaused(false); }
-    await post("/api/command", { action, symbol, size_pct });
-    flash(`${action.toUpperCase()} ${symbol ? label(symbol) : ""} submitted — executing…`);
-  };
-  const sendSwap = async (from: string, to: string, size_pct: number) => {
-    if (from === to) return;
-    if (mode !== "manual") await switchMode("manual");
-    if (paused) { await post("/api/control", { paused: false }); setPaused(false); }
-    await post("/api/command", { action: "swap", from, to, size_pct });
-    flash(`Swap ${lbl(from)} → ${lbl(to)} submitted — executing…`);
+    const verb = action === "buy" ? `Buying ${label(symbol ?? "")}` : action === "sell" ? `Selling ${label(symbol ?? "")}` : "Closing all positions";
+    await runAction(`${verb}…`, { action, symbol, size_pct });
   };
   const commitMandate = (patch: Record<string, number>) => post("/api/mandate", patch);
 
@@ -137,12 +162,15 @@ export default function AgentConsole() {
         </div>
       </div>
 
-      {/* pending command banner */}
+      {/* executing — full-width sweeping loader */}
       {pending && (
-        <div className="px-5 py-2.5 flex items-center gap-2 text-[12px] border-b border-[var(--color-line)]"
-          style={{ background: "rgba(255,180,77,0.08)", color: "var(--color-amber)" }}>
-          <Loader2 size={13} className="animate-spin" />
-          <span className="tnum">executing {pending.action.toUpperCase()} {pending.symbol ? label(pending.symbol) : ""}…</span>
+        <div className="border-b border-[var(--color-line)]">
+          <div className="loadbar" />
+          <div className="px-5 py-2.5 flex items-center gap-2 text-[12px]"
+            style={{ background: "rgba(78,230,168,0.05)", color: "var(--color-mint)" }}>
+            <Loader2 size={13} className="animate-spin" />
+            <span className="tnum">executing {pending.action.toUpperCase()} {pending.symbol ? label(pending.symbol) : ""}…</span>
+          </div>
         </div>
       )}
 
@@ -283,12 +311,6 @@ export default function AgentConsole() {
         )}
       </div>
 
-      {toast && (
-        <div className="px-5 py-2 text-[12px] tnum border-t border-[var(--color-line)]"
-          style={{ color: "var(--color-mint)", background: "rgba(78,230,168,0.06)" }}>
-          ✓ {toast}
-        </div>
-      )}
       <div className="px-5 py-3 border-t border-[var(--color-line)] flex items-center gap-2.5">
         <ShieldCheck size={14} className="text-[var(--color-mint)] shrink-0" />
         <p className="text-[11px] text-[var(--color-muted)] leading-snug">

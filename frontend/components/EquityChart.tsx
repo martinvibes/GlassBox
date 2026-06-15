@@ -5,6 +5,7 @@ import {
   AreaSeries,
   type IChartApi,
   type ISeriesApi,
+  type IPriceLine,
   type UTCTimestamp,
 } from "lightweight-charts";
 
@@ -18,6 +19,7 @@ export default function EquityChart({
   const box = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const areaRef = useRef<ISeriesApi<"Area"> | null>(null);
+  const priceLineRef = useRef<IPriceLine | null>(null);
 
   useEffect(() => {
     if (!box.current) return;
@@ -65,8 +67,11 @@ export default function EquityChart({
         ? series.map((p) => ({ time: p.t as UTCTimestamp, value: p.v }))
         : [];
     areaRef.current.setData(data);
-    // baseline marker at starting equity
-    areaRef.current.createPriceLine({
+    // baseline marker at starting equity — create ONCE, then keep updated
+    if (priceLineRef.current) {
+      areaRef.current.removePriceLine(priceLineRef.current);
+    }
+    priceLineRef.current = areaRef.current.createPriceLine({
       price: start,
       color: "rgba(255,255,255,0.18)",
       lineWidth: 1,

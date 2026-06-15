@@ -50,6 +50,22 @@ export async function readAgentId(): Promise<string | null> {
   }
 }
 
+export interface AllowToken {
+  symbol: string;
+  address: string;
+  decimals: number;
+  is_stable: boolean;
+}
+export async function readAllowlistTokens(): Promise<AllowToken[]> {
+  const raw = await readText(path.join(BACKEND, "rules", "token_allowlist.json"));
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw).tokens ?? [];
+  } catch {
+    return [];
+  }
+}
+
 // Minimal .env parse (server-side) to surface wallet + mode in the UI.
 export async function readEnv(): Promise<Record<string, string>> {
   const raw = await readText(path.join(BACKEND, ".env"));
@@ -107,6 +123,21 @@ export async function readControl(): Promise<ControlState> {
     };
   } catch {
     return dflt;
+  }
+}
+
+export async function readPendingCommand(): Promise<{ action: string; symbol: string } | null> {
+  const cmdRaw = await readText(path.join(DATA, "command.json"));
+  const rtRaw = await readText(path.join(DATA, "agent_runtime.json"));
+  if (!cmdRaw) return null;
+  try {
+    const cmd = JSON.parse(cmdRaw);
+    if (!cmd.ts) return null;
+    const lastTs = rtRaw ? JSON.parse(rtRaw).command_last_ts : undefined;
+    if (cmd.ts === lastTs) return null; // already consumed
+    return { action: cmd.action, symbol: cmd.symbol ?? "" };
+  } catch {
+    return null;
   }
 }
 

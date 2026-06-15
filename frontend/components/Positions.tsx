@@ -18,7 +18,7 @@ export default function Positions({
   const cash = portfolio?.cash_usd ?? 0;
 
   return (
-    <div className="glass flex flex-col">
+    <div className="glass flex flex-col h-full overflow-y-auto">
       <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-line)]">
         <span className="label">positions · self-custody</span>
         <span className="label">{positions.length + 1} holdings</span>

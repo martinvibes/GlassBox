@@ -242,13 +242,28 @@ class Orchestrator:
         ), runtime
 
     # ── loop ─────────────────────────────────────────────────────────────
+    def _command_pending(self) -> bool:
+        """True if a manual command from the console hasn't been consumed yet."""
+        cmd = control.read_command(self.s.data_dir)
+        ts = cmd.get("ts")
+        if not ts:
+            return False
+        return ts != control.read_runtime(self.s.data_dir).get("command_last_ts")
+
     def run_forever(self) -> None:
         print(f"GlassBox running in {self.s.mode.upper()} mode "
-              f"(heartbeat {self.s.heartbeat_seconds}s). Ctrl-C to stop.\n")
+              f"(heartbeat {self.s.heartbeat_seconds}s, polling 5s). Ctrl-C to stop.\n")
+        poll = 5.0
+        last_heartbeat = 0.0
         try:
             while True:
-                self.run_cycle()
-                time.sleep(self.s.heartbeat_seconds)
+                now = time.monotonic()
+                due = (now - last_heartbeat) >= self.s.heartbeat_seconds
+                # run immediately on a pending manual command, else on the heartbeat
+                if due or self._command_pending():
+                    self.run_cycle()
+                    last_heartbeat = now
+                time.sleep(poll)
         except KeyboardInterrupt:
             print("\nstopped.")
 

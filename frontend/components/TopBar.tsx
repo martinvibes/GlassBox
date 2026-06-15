@@ -18,44 +18,72 @@ export default function TopBar({
 }) {
   const [clock, setClock] = useState("--:--:--");
   useEffect(() => {
-    const t = () => setClock(new Date().toISOString().slice(11, 19) + "Z");
+    const t = () => setClock(new Date().toISOString().slice(11, 19));
     t();
     const id = setInterval(t, 1000);
     return () => clearInterval(id);
   }, []);
+
+  const live = mode === "live";
 
   return (
     <motion.header
       initial={{ opacity: 0, y: -16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6, ease: "easeOut" }}
-      className="flex items-center justify-between gap-4 flex-wrap"
+      className="flex items-end justify-between gap-4 flex-wrap"
     >
       <div>
-        <h1 className="display text-[28px] leading-none">Live Desk</h1>
-        <div className="label mt-1.5">autonomous trading · bnb chain · self-custody</div>
+        <h1 className="text-[27px] font-semibold tracking-[-0.02em] leading-none">Live Desk</h1>
+        <p className="text-[13px] text-[var(--color-muted)] mt-2">
+          Autonomous trading · BNB Chain · self-custody
+        </p>
       </div>
 
-      <div className="flex items-center gap-3 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap">
         <RegimePill regime={regime} />
-        <Meta k="mode" v={mode.toUpperCase()} accent={mode === "live" ? "var(--color-mint)" : "var(--color-cyan)"} />
-        <Meta k="cycles" v={String(cycles)} />
-        <Meta k="wallet" v={short(wallet)} />
-        <div className="flex items-center gap-2 rounded-full px-3 py-1.5 hairline" style={{ background: "rgba(255,255,255,0.02)" }}>
+        <Chip
+          label="Mode"
+          value={mode.toUpperCase()}
+          accent={live ? "var(--color-mint)" : "var(--color-cyan)"}
+          dot={live ? "var(--color-mint)" : undefined}
+        />
+        <Chip label="Cycles" value={String(cycles)} />
+        <Chip label="Wallet" value={short(wallet)} mono />
+        <div
+          className="inline-flex items-center gap-2 rounded-full px-3.5 py-2 hairline"
+          style={{ background: "rgba(255,255,255,0.02)" }}
+        >
           <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-mint)] live-dot" />
-          <span className="tnum text-[12px] text-[var(--color-muted)]">{clock}</span>
+          <span className="tnum text-[12.5px] text-[var(--color-muted)]">{clock} UTC</span>
         </div>
       </div>
     </motion.header>
   );
 }
 
-function Meta({ k, v, accent }: { k: string; v: string; accent?: string }) {
+function Chip({
+  label,
+  value,
+  accent,
+  mono,
+  dot,
+}: {
+  label: string;
+  value: string;
+  accent?: string;
+  mono?: boolean;
+  dot?: string;
+}) {
   return (
-    <div className="hidden md:flex flex-col items-end leading-tight">
-      <span className="label">{k}</span>
-      <span className="tnum text-[12px]" style={accent ? { color: accent } : undefined}>
-        {v}
+    <div
+      className="inline-flex items-center gap-2 rounded-full px-3.5 py-2 hairline"
+      style={{ background: "rgba(255,255,255,0.02)" }}
+    >
+      {dot && <span className="h-1.5 w-1.5 rounded-full" style={{ background: dot }} />}
+      <span className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-faint)]">{label}</span>
+      <span className={`text-[12.5px] ${mono ? "tnum" : "font-medium"}`} style={accent ? { color: accent } : undefined}>
+        {value}
       </span>
     </div>
   );

@@ -94,6 +94,7 @@ export interface StatePayload {
   paused: boolean;
   agentMode: "autonomous" | "dca" | "manual";
   dca: { token?: string; amount_usd?: number; interval_hours?: number } | null;
+  pendingCommand: { action: string; symbol: string } | null;
   regime: Regime;
   fearGreed: number | null;
   equitySeries: { t: number; v: number }[];

@@ -7,6 +7,7 @@ import {
   readRulebookCaps,
   readControl,
   readMandate,
+  readPendingCommand,
 } from "@/lib/backend";
 import type { Regime, StatePayload } from "@/lib/types";
 
@@ -23,6 +24,7 @@ export async function GET() {
     readControl(),
     readMandate(),
   ]);
+  const pendingCommand = await readPendingCommand();
 
   // effective config = rulebook defaults overlaid with the dashboard mandate
   const eff = {
@@ -65,6 +67,7 @@ export async function GET() {
     paused: control.paused,
     agentMode: control.mode,
     dca: control.dca ?? null,
+    pendingCommand,
     regime,
     fearGreed: latest?.signals.fear_greed ?? null,
     equitySeries,

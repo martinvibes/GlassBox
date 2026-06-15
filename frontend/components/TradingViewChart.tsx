@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import TokenIcon from "./TokenIcon";
 
 // Real TradingView Advanced Chart — full history, pro drawing tools (labeled on
 // hover), every indicator + timeframe. Data is TradingView's (Binance feed), so
@@ -9,6 +10,7 @@ const SYMBOLS: Record<string, string> = {
   BTC: "BINANCE:BTCUSDT",
   ETH: "BINANCE:ETHUSDT",
   CAKE: "BINANCE:CAKEUSDT",
+  SOL: "BINANCE:SOLUSDT",
 };
 
 export default function TradingViewChart() {
@@ -70,12 +72,13 @@ export default function TradingViewChart() {
               <button
                 key={s}
                 onClick={() => setSym(s)}
-                className="tnum text-[11px] px-2.5 py-1 rounded-md transition-colors"
+                className="inline-flex items-center gap-1.5 tnum text-[11px] pl-1 pr-2.5 py-1 rounded-full transition-colors"
                 style={{
                   color: s === sym ? "#08080b" : "var(--color-muted)",
                   background: s === sym ? "var(--color-mint)" : "rgba(255,255,255,0.03)",
                 }}
               >
+                <TokenIcon symbol={s} size={16} />
                 {s}
               </button>
             ))}

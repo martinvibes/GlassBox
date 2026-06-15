@@ -150,6 +150,68 @@ def _evaluate(
         base.reasons.append(f"reduce-risk SELL of {proposal.symbol} (${notional:.2f})")
         return base
 
+    # ── 3b. SWAP path — user-directed any→any (manual). Directed: skips AI
+    #        gates but keeps drawdown breaker (above), allowlist, slippage,
+    #        from-availability, and the TO-side position/min-trade caps. ──────
+    if proposal.action == Action.SWAP:
+        state.roll_day(now)
+        base_ccy = rb["capital"]["base_currency"]
+        from_sym, to_sym = proposal.symbol, proposal.to_symbol
+        base.action = Action.SWAP
+        base.symbol = to_sym
+        base.from_symbol = from_sym
+        allowlist = rb.get("_allowlist_symbols")
+        if allowlist is not None and (from_sym not in allowlist or to_sym not in allowlist):
+            base.reasons.append(f"BLOCK: {from_sym} or {to_sym} not in allowlist")
+            return base
+        if not from_sym or not to_sym or from_sym == to_sym:
+            base.reasons.append("BLOCK: invalid swap pair")
+            return base
+        if state.trades_today >= limits["max_trades_per_day"]:
+            base.reasons.append("BLOCK: daily trade cap reached")
+            return base
+
+        from_mark = 1.0 if from_sym == base_ccy else prices.get(from_sym, 0.0)
+        to_mark = 1.0 if to_sym == base_ccy else prices.get(to_sym, 0.0)
+        if from_mark <= 0 or to_mark <= 0:
+            base.reasons.append("BLOCK: missing mark price for swap")
+            return base
+
+        # how much of FROM (in USD) is available?
+        if from_sym == base_ccy:
+            from_avail = portfolio.cash_usd
+        else:
+            from_avail = portfolio.positions[from_sym].value_usd(from_mark) if from_sym in portfolio.positions else 0.0
+        usd = max(0.0, equity * max(0.0, proposal.size_pct) / 100.0)
+        reasons: list[str] = []
+        if usd > from_avail:
+            reasons.append(f"clamp to available {from_sym} ${from_avail:.2f}")
+            usd = from_avail
+
+        # cap the TO side by max_position (only when acquiring a non-base token)
+        if to_sym != base_ccy:
+            cur_to = portfolio.positions[to_sym].value_usd(to_mark) if to_sym in portfolio.positions else 0.0
+            room = max(0.0, equity * sizing["max_position_pct"] / 100.0 - cur_to)
+            if usd > room:
+                reasons.append(f"clamp to max_position {sizing['max_position_pct']}% of {to_sym}")
+                usd = room
+            slip = (signals.tokens or {}).get(to_sym, {}).get("est_slippage_bps")
+            if slip is not None and slip > limits["max_slippage_bps"]:
+                base.reasons.append(f"BLOCK: slippage {slip}bps > cap")
+                return base
+
+        if usd < sizing["min_trade_usd"]:
+            base.reasons.append(f"BLOCK: swap ${usd:.2f} < min ${sizing['min_trade_usd']}")
+            base.reasons.extend(reasons)
+            return base
+
+        base.verdict = GateVerdict.CLAMP if reasons else GateVerdict.ALLOW
+        base.approved_size_pct = round(usd / equity * 100.0, 3) if equity > 0 else 0.0
+        base.approved_notional_usd = round(usd, 2)
+        base.reasons.append(f"SWAP {from_sym}→{to_sym} ${usd:.2f}")
+        base.reasons.extend(reasons)
+        return base
+
     # ── 4. BUY path — the disciplined gauntlet ───────────────────────────
     state.roll_day(now)
 

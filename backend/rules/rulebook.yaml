@@ -8,7 +8,7 @@
 version: 1
 
 capital:
-  base_currency: USDT          # we measure PnL and rest in this
+  base_currency: USDT          # we measure PnL and rest in this (deepest BSC liquidity)
   starting_equity_usd: 1000.0  # paper/live starting bankroll (set per live window)
 
 drawdown:

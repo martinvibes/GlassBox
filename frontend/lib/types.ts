@@ -1,7 +1,7 @@
 // Mirrors backend/glassbox/models.py — the audit artifacts the dashboard renders.
 
 export type Regime = "risk_off" | "neutral" | "risk_on" | "euphoria" | "unknown";
-export type Action = "buy" | "sell" | "hold";
+export type Action = "buy" | "sell" | "hold" | "swap";
 export type Verdict = "allow" | "clamp" | "block" | "flatten";
 
 export interface Signals {
@@ -29,6 +29,7 @@ export interface Decision {
   verdict: Verdict;
   action: Action;
   symbol: string;
+  from_symbol?: string;
   approved_size_pct: number;
   approved_notional_usd: number;
   reasons: string[];

@@ -77,11 +77,12 @@ export function VerdictChip({ verdict }: { verdict: Verdict }) {
   );
 }
 
-const ACTION_GLYPH: Record<Action, string> = { buy: "▲", sell: "▼", hold: "■" };
+const ACTION_GLYPH: Record<Action, string> = { buy: "▲", sell: "▼", hold: "■", swap: "⇄" };
 const ACTION_COLOR: Record<Action, string> = {
   buy: "var(--color-mint)",
   sell: "var(--color-danger)",
   hold: "var(--color-faint)",
+  swap: "var(--color-cyan)",
 };
 
 export function ActionGlyph({ action }: { action: Action }) {

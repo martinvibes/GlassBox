@@ -73,18 +73,25 @@ class Orchestrator:
         signals: Signals = self.perception.fetch()
         equity = self.portfolio.equity_usd(signals.prices_usd)
 
-        # 2. decide the proposal by mode (the LLM proposes only in autonomous mode;
-        #    DCA & manual are user-directed and bypass AI gates but keep hard safety)
+        # 2. decide the proposal. A pending one-shot user command (manual trade /
+        #    wallet convert) ALWAYS takes priority and executes regardless of mode.
+        #    Otherwise the active mode drives: dca schedule, manual standby, or AI.
         if paused:
             proposal = TradeProposal(
                 action=Action.HOLD, conviction=0.0,
                 rationale="paused by operator from the console — standing down.",
                 proposed_regime=signals.regime, source="operator",
             )
-        elif mode == "manual":
+        elif self._command_pending():
             proposal, runtime = self._manual_proposal(signals, equity, runtime)
         elif mode == "dca":
             proposal, runtime = self._dca_proposal(ctrl.get("dca", {}), signals, equity, now, runtime)
+        elif mode == "manual":
+            proposal = TradeProposal(
+                action=Action.HOLD, conviction=0.0,
+                rationale="manual mode — standing by for your trade.",
+                proposed_regime=signals.regime, source="manual",
+            )
         else:  # autonomous
             proposal = self.reasoner.propose(signals, self.portfolio)
             if (
@@ -106,7 +113,7 @@ class Orchestrator:
         execution = self.executor.execute(decision, self.portfolio, signals.prices_usd)
 
         # 4b. update risk bookkeeping on a real fill
-        if execution.ok and execution.action in (Action.BUY, Action.SELL):
+        if execution.ok and execution.action in (Action.BUY, Action.SELL, Action.SWAP):
             if execution.notional_usd > 0:
                 self.risk_state.record_trade(now)
         # 4c. arm the pause window after a drawdown-breach flatten
@@ -175,6 +182,17 @@ class Orchestrator:
         runtime["command_last_ts"] = ts
         action = str(cmd.get("action", "")).lower()
         symbol = str(cmd.get("symbol", "")).upper()
+
+        if action == "swap":
+            from_sym = str(cmd.get("from", "")).upper()
+            to_sym = str(cmd.get("to", "")).upper()
+            size_pct = float(cmd.get("size_pct", 0.0))
+            return TradeProposal(
+                action=Action.SWAP, symbol=from_sym, to_symbol=to_sym,
+                size_pct=size_pct, conviction=1.0, directed=True,
+                rationale=f"manual swap {from_sym} → {to_sym} (~{size_pct:.0f}% equity) from console.",
+                proposed_regime=signals.regime, source="manual",
+            ), runtime
 
         if action == "flatten":
             if not self.portfolio.positions:

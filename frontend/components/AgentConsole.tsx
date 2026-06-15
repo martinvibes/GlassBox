@@ -1,10 +1,11 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import {
-  Play, Pause, ShieldCheck, Repeat, ArrowUp, ArrowDown, XCircle, ArrowRight, ChevronDown, Loader2,
+  Play, Pause, ShieldCheck, Repeat, XCircle, ArrowRight, ArrowDownUp, ChevronDown, Loader2,
 } from "lucide-react";
 import { usePolling } from "@/lib/usePolling";
 import { money } from "@/lib/format";
+import TokenIcon from "./TokenIcon";
 import type { StatePayload, Action } from "@/lib/types";
 
 type Mode = "autonomous" | "dca" | "manual";
@@ -12,13 +13,26 @@ const ACTION_COLOR: Record<Action, string> = {
   buy: "var(--color-mint)",
   sell: "var(--color-danger)",
   hold: "var(--color-faint)",
+  swap: "var(--color-cyan)",
 };
 const TOKENS = [
   { label: "BNB", sym: "WBNB" },
   { label: "BTC", sym: "BTCB" },
   { label: "ETH", sym: "ETH" },
+  { label: "SOL", sym: "SOL" },
   { label: "CAKE", sym: "CAKE" },
 ];
+// full set (incl. stablecoins) for the manual Swap — any → any
+const SWAP_TOKENS = [
+  { label: "USDC", sym: "USDC" },
+  { label: "USDT", sym: "USDT" },
+  { label: "BNB", sym: "WBNB" },
+  { label: "BTC", sym: "BTCB" },
+  { label: "ETH", sym: "ETH" },
+  { label: "SOL", sym: "SOL" },
+  { label: "CAKE", sym: "CAKE" },
+];
+const lbl = (sym: string) => SWAP_TOKENS.find((t) => t.sym === sym)?.label ?? sym;
 const INTERVALS = [
   { label: "1h", h: 1 },
   { label: "6h", h: 6 },
@@ -39,7 +53,8 @@ export default function AgentConsole() {
   const [dcaTok, setDcaTok] = useState("WBNB");
   const [dcaAmt, setDcaAmt] = useState(25);
   const [dcaInt, setDcaInt] = useState(6);
-  const [manTok, setManTok] = useState("WBNB");
+  const [manFrom, setManFrom] = useState("USDT");
+  const [manTo, setManTo] = useState("WBNB");
   const [manPct, setManPct] = useState(10);
   const [m, setM] = useState<{ ceiling: number; pos: number; conv: number; trades: number } | null>(null);
   const initialized = useRef(false);
@@ -90,6 +105,13 @@ export default function AgentConsole() {
     if (paused) { await post("/api/control", { paused: false }); setPaused(false); }
     await post("/api/command", { action, symbol, size_pct });
     flash(`${action.toUpperCase()} ${symbol ? label(symbol) : ""} submitted — executing…`);
+  };
+  const sendSwap = async (from: string, to: string, size_pct: number) => {
+    if (from === to) return;
+    if (mode !== "manual") await switchMode("manual");
+    if (paused) { await post("/api/control", { paused: false }); setPaused(false); }
+    await post("/api/command", { action: "swap", from, to, size_pct });
+    flash(`Swap ${lbl(from)} → ${lbl(to)} submitted — executing…`);
   };
   const commitMandate = (patch: Record<string, number>) => post("/api/mandate", patch);
 
@@ -157,16 +179,17 @@ export default function AgentConsole() {
         {/* AUTONOMOUS */}
         {mode === "autonomous" && (
           <p className="text-[12px] text-[var(--color-muted)] leading-relaxed">
-            AI decides · you set the guardrails. <span className="text-[var(--color-fg)]">Competition mode.</span>
+            The agent trades autonomously — <span className="text-[var(--color-fg)]">opening positions</span> on conviction and
+            <span className="text-[var(--color-fg)]"> taking profit / cutting risk</span> back to cash. You set the guardrails.
+            <span className="text-[var(--color-fg)]"> Competition mode.</span>
           </p>
         )}
 
         {/* DCA */}
         {mode === "dca" && (
           <div className="flex flex-col gap-3">
-            <Field label="token to buy"><TokenSelect value={dcaTok} onChange={setDcaTok} /></Field>
-            <SwapPreview from={BASE} to={label(dcaTok)} note={`$${dcaAmt} every ${dcaInt}h`} />
-            <Field label="amount per buy">
+            <Field label="token"><TokenSelect value={dcaTok} onChange={setDcaTok} /></Field>
+            <Field label="buy amount">
               <div className="flex items-center gap-2">
                 <span className="tnum text-[var(--color-faint)]">$</span>
                 <input type="number" min={5} value={dcaAmt} onChange={(e) => setDcaAmt(Math.max(5, +e.target.value))}
@@ -187,15 +210,19 @@ export default function AgentConsole() {
             <button onClick={armDca}
               className="w-full flex items-center justify-center gap-2 rounded-xl py-3 text-[14px] font-semibold transition-transform hover:scale-[1.01] active:scale-95"
               style={{ background: "var(--color-mint)", color: "#08080b", boxShadow: "0 0 30px -10px var(--color-mint)" }}>
-              <Repeat size={15} /> Arm DCA strategy
+              <Repeat size={15} /> Start DCA · buy {label(dcaTok)} ${dcaAmt}/{dcaInt}h
             </button>
           </div>
         )}
 
-        {/* MANUAL */}
+        {/* MANUAL — manual trading (buy / sell) */}
         {mode === "manual" && (
           <div className="flex flex-col gap-3">
-            <Field label="token"><TokenSelect value={manTok} onChange={setManTok} /></Field>
+            <p className="text-[11.5px] text-[var(--color-muted)] leading-snug">
+              Trade by hand. <span className="text-[var(--color-fg)]">Buy</span> opens a position,
+              <span className="text-[var(--color-fg)]"> Sell</span> closes it — still risk-gated.
+            </p>
+            <Field label="token"><TokenSelect value={manTo} onChange={setManTo} /></Field>
             <Field label="size (% of equity)">
               <div className="flex items-center justify-between">
                 <input type="number" min={1} max={60} value={manPct} onChange={(e) => setManPct(Math.max(1, Math.min(60, +e.target.value)))}
@@ -203,22 +230,21 @@ export default function AgentConsole() {
                 <span className="tnum text-[12px] text-[var(--color-faint)]">≈ {money(manUsd)}</span>
               </div>
             </Field>
-            <SwapPreview from={BASE} to={label(manTok)} note="buy" />
             <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => sendCommand("buy", manTok, manPct)}
-                className="flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[13px] font-semibold transition-transform hover:scale-[1.02] active:scale-95"
+              <button onClick={() => sendCommand("buy", manTo, manPct)}
+                className="flex items-center justify-center gap-1.5 rounded-xl py-3 text-[14px] font-semibold transition-transform hover:scale-[1.02] active:scale-95"
                 style={{ background: "var(--color-mint)", color: "#08080b" }}>
-                <ArrowUp size={14} /> Buy {label(manTok)}
+                Buy {label(manTo)}
               </button>
-              <button onClick={() => sendCommand("sell", manTok)}
-                className="flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[13px] font-semibold transition-transform hover:scale-[1.02] active:scale-95"
+              <button onClick={() => sendCommand("sell", manTo)}
+                className="flex items-center justify-center gap-1.5 rounded-xl py-3 text-[14px] font-semibold transition-transform hover:scale-[1.02] active:scale-95"
                 style={{ background: "rgba(255,93,108,0.14)", color: "var(--color-danger)" }}>
-                <ArrowDown size={14} /> Sell {label(manTok)}
+                Sell {label(manTo)}
               </button>
             </div>
             <button onClick={() => sendCommand("flatten")}
               className="w-full flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[13px] hairline text-[var(--color-muted)] hover:text-[var(--color-danger)] transition-colors">
-              <XCircle size={14} /> Flatten all positions
+              <XCircle size={14} /> Close all positions
             </button>
             <p className="label" style={{ letterSpacing: "0.1em" }}>routed through the gate · fills in seconds</p>
           </div>
@@ -277,8 +303,10 @@ function SwapPreview({ from, to, note }: { from: string; to: string; note: strin
   return (
     <div className="flex items-center justify-between panel px-4 py-2.5">
       <div className="flex items-center gap-2 text-[13px]">
+        <TokenIcon symbol={from} size={18} />
         <span className="text-[var(--color-muted)]">{from}</span>
         <ArrowRight size={13} className="text-[var(--color-mint)]" />
+        <TokenIcon symbol={to} size={18} />
         <span className="text-[var(--color-fg)]">{to}</span>
       </div>
       <span className="label">{note}</span>
@@ -295,13 +323,35 @@ function Field({ label: l, children }: { label: string; children: React.ReactNod
   );
 }
 
+function TokenChips({ value, onChange, exclude }: { value: string; onChange: (v: string) => void; exclude?: string }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {SWAP_TOKENS.filter((t) => t.sym !== exclude).map((t) => (
+        <button
+          key={t.sym}
+          onClick={() => onChange(t.sym)}
+          className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11.5px] transition-colors"
+          style={{
+            color: value === t.sym ? "#08080b" : "var(--color-muted)",
+            background: value === t.sym ? "var(--color-mint)" : "rgba(255,255,255,0.03)",
+          }}
+        >
+          <TokenIcon symbol={t.sym} size={14} />
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function TokenSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <div className="flex gap-1">
       {TOKENS.map((t) => (
         <button key={t.sym} onClick={() => onChange(t.sym)}
-          className="flex-1 tnum text-[12px] py-1 rounded-md transition-colors"
+          className="flex-1 inline-flex items-center justify-center gap-1.5 tnum text-[12px] py-1.5 rounded-md transition-colors"
           style={{ color: value === t.sym ? "#08080b" : "var(--color-muted)", background: value === t.sym ? "var(--color-mint)" : "rgba(255,255,255,0.03)" }}>
+          <TokenIcon symbol={t.sym} size={15} />
           {t.label}
         </button>
       ))}

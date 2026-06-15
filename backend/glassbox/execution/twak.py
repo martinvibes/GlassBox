@@ -83,32 +83,38 @@ class Executor:
                 error="twak CLI not available — install with `npm i -g @trustwallet/cli`",
             )
 
-        sym = decision.symbol
         base = self.s.base_currency
-        if sym not in self.s.allowlist or base not in self.s.allowlist:
-            return ExecutionResult(
-                ok=False, action=decision.action, symbol=sym, venue="pancakeswap",
-                error=f"token {sym} or base {base} missing from allowlist",
-            )
-
-        base_asset = bsc_token_ref(self.s.allowlist[base])
-        sym_asset = bsc_token_ref(self.s.allowlist[sym])
         slippage_pct = self.s.rulebook["limits"]["max_slippage_bps"] / 100.0
-        # Do NOT pass --password on the CLI (visible in process list / shell history).
-        # The CLI uses the OS keychain or the inherited TWAK_WALLET_PASSWORD env var.
-        pw = None
+        pw = None  # CLI uses OS keychain / inherited TWAK_WALLET_PASSWORD env
 
-        if decision.action == Action.BUY:
-            amount = decision.approved_notional_usd      # in base-currency (≈USD) units
-            from_asset, to_asset = base_asset, sym_asset
+        def asset(s: str) -> str:
+            return bsc_token_ref(self.s.allowlist[s])
+
+        if decision.action == Action.SWAP:
+            from_sym, sym = decision.from_symbol, decision.symbol
+            if from_sym not in self.s.allowlist or sym not in self.s.allowlist:
+                return ExecutionResult(ok=False, action=decision.action, symbol=sym,
+                                       venue="pancakeswap", error=f"{from_sym}/{sym} not in allowlist")
+            from_price = 1.0 if from_sym == base else prices_usd.get(from_sym, 0.0)
+            if from_price <= 0:
+                return ExecutionResult(ok=False, action=decision.action, symbol=sym,
+                                       venue="pancakeswap", error=f"no mark for {from_sym}")
+            amount = decision.approved_notional_usd / from_price  # in FROM units
+            from_asset, to_asset = asset(from_sym), asset(sym)
+        elif decision.action == Action.BUY:
+            sym = decision.symbol
+            if sym not in self.s.allowlist or base not in self.s.allowlist:
+                return ExecutionResult(ok=False, action=decision.action, symbol=sym,
+                                       venue="pancakeswap", error=f"{sym}/{base} not in allowlist")
+            amount = decision.approved_notional_usd              # base (≈USD) units
+            from_asset, to_asset = asset(base), asset(sym)
         else:  # SELL / FLATTEN
+            sym = decision.symbol
             if sym not in portfolio.positions:
-                return ExecutionResult(
-                    ok=False, action=decision.action, symbol=sym, venue="pancakeswap",
-                    error=f"no position in {sym} to sell",
-                )
-            amount = portfolio.positions[sym].qty        # in token units
-            from_asset, to_asset = sym_asset, base_asset
+                return ExecutionResult(ok=False, action=decision.action, symbol=sym,
+                                       venue="pancakeswap", error=f"no position in {sym} to sell")
+            amount = portfolio.positions[sym].qty                # token units
+            from_asset, to_asset = asset(sym), asset(base)
 
         # 1. quote first (no signing) — fail fast on routing/slippage issues
         quote = self.cli.swap(amount, from_asset, to_asset, slippage_pct,
@@ -189,6 +195,17 @@ class Executor:
     def _paper_execute(
         self, decision: GateDecision, portfolio: Portfolio, prices_usd: dict[str, float]
     ) -> ExecutionResult:
+        # SWAP — generic any→any (manual)
+        if decision.action == Action.SWAP:
+            from_sym, to_sym = decision.from_symbol, decision.symbol
+            usd = decision.approved_notional_usd
+            to_qty, to_price = state_store.apply_paper_swap(
+                portfolio, from_sym, to_sym, usd, prices_usd,
+                self.s.base_currency, _PAPER_FEE_BPS, _PAPER_SLIP_BPS,
+            )
+            fee = usd * _PAPER_FEE_BPS / 10_000
+            return self._result(Action.SWAP, to_sym, to_qty, to_price, usd, fee)
+
         sym = decision.symbol
         mark = prices_usd.get(sym, 0.0)
         if mark <= 0:

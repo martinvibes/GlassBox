@@ -10,6 +10,7 @@ const CG_IDS: Record<string, string> = {
   BTCB: "bitcoin",
   ETH: "ethereum",
   CAKE: "pancakeswap-token",
+  SOL: "solana",
 };
 
 async function rpc(method: string, params: unknown[]): Promise<string> {

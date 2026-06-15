@@ -28,6 +28,7 @@ COINGECKO_IDS: dict[str, str] = {
     "BTCB": "bitcoin",
     "ETH": "ethereum",
     "CAKE": "pancakeswap-token",
+    "SOL": "solana",
 }
 STABLES = {"USDT", "USDC"}
 

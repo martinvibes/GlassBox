@@ -1,9 +1,21 @@
 "use client";
 import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { Copy, Check, QrCode, Wallet } from "lucide-react";
+import { Copy, Check, QrCode, Wallet, ArrowRightLeft, ArrowDownUp } from "lucide-react";
 import { usePolling } from "@/lib/usePolling";
 import { money } from "@/lib/format";
+import TokenIcon from "./TokenIcon";
+
+const CONV_TOKENS = [
+  { label: "USDC", sym: "USDC" },
+  { label: "USDT", sym: "USDT" },
+  { label: "BNB", sym: "WBNB" },
+  { label: "BTC", sym: "BTCB" },
+  { label: "ETH", sym: "ETH" },
+  { label: "SOL", sym: "SOL" },
+  { label: "CAKE", sym: "CAKE" },
+];
+const cl = (s: string) => CONV_TOKENS.find((t) => t.sym === s)?.label ?? s;
 
 type WalletData = {
   ok: boolean;
@@ -15,20 +27,27 @@ type WalletData = {
   funded?: boolean;
 };
 
-const TOKEN_TINT: Record<string, string> = {
-  USDT: "var(--color-mint)",
-  USDC: "var(--color-cyan)",
-  BNB: "var(--color-amber)",
-  WBNB: "var(--color-amber)",
-  BTCB: "#f7931a",
-  ETH: "var(--color-violet)",
-  CAKE: "#d1884f",
-};
-
 export default function WalletPanel() {
   const { data } = usePolling<WalletData>("/api/wallet", 12000);
   const [copied, setCopied] = useState(false);
   const [showQr, setShowQr] = useState(false);
+  const [convOpen, setConvOpen] = useState(false);
+  const [cFrom, setCFrom] = useState("USDC");
+  const [cTo, setCTo] = useState("USDT");
+  const [cPct, setCPct] = useState(100);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const convert = async () => {
+    if (cFrom === cTo) return;
+    await fetch("/api/control", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paused: false }) });
+    await fetch("/api/command", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "swap", from: cFrom, to: cTo, size_pct: cPct }),
+    });
+    setToast(`Converting ${cl(cFrom)} → ${cl(cTo)}…`);
+    setTimeout(() => setToast(null), 3500);
+  };
 
   const address = data?.address ?? null;
   const funded = !!data?.funded;
@@ -116,12 +135,7 @@ export default function WalletPanel() {
             )}
             {rows.map((b) => (
               <div key={b.symbol} className="flex items-center gap-3">
-                <span
-                  className="h-7 w-7 rounded-full flex items-center justify-center text-[10px] font-semibold shrink-0"
-                  style={{ background: `${TOKEN_TINT[b.symbol] ?? "var(--color-muted)"}22`, color: TOKEN_TINT[b.symbol] ?? "var(--color-muted)" }}
-                >
-                  {b.symbol.slice(0, 3)}
-                </span>
+                <TokenIcon symbol={b.symbol} size={28} />
                 <div className="flex-1">
                   <div className="text-[13px]">{b.symbol}</div>
                   <div className="tnum text-[11px] text-[var(--color-faint)]">
@@ -133,6 +147,64 @@ export default function WalletPanel() {
             ))}
           </div>
         </div>
+
+        {/* convert tokens (utility) */}
+        <div className="border-t border-[var(--color-line)] pt-4">
+          <button onClick={() => setConvOpen((v) => !v)} className="flex items-center justify-between w-full group">
+            <span className="flex items-center gap-2">
+              <ArrowRightLeft size={13} className="text-[var(--color-mint)]" />
+              <span className="label">convert tokens</span>
+            </span>
+            <span className="label">{convOpen ? "−" : "+"}</span>
+          </button>
+          {convOpen && (
+            <div className="flex flex-col gap-2.5 mt-3">
+              <ConvRow label="from" value={cFrom} onChange={setCFrom} exclude={cTo} />
+              <div className="flex justify-center -my-1">
+                <button onClick={() => { const a = cFrom; setCFrom(cTo); setCTo(a); }}
+                  className="h-6 w-6 rounded-full hairline flex items-center justify-center hover:bg-white/[0.05]" title="flip">
+                  <ArrowDownUp size={12} className="text-[var(--color-mint)]" />
+                </button>
+              </div>
+              <ConvRow label="to" value={cTo} onChange={setCTo} exclude={cFrom} />
+              <div className="panel px-3.5 py-2 flex items-center justify-between">
+                <span className="label">amount</span>
+                <div className="flex items-center gap-1.5">
+                  <input type="number" min={1} max={100} value={cPct} onChange={(e) => setCPct(Math.max(1, Math.min(100, +e.target.value)))}
+                    className="w-12 bg-transparent tnum text-[13px] outline-none text-right" />
+                  <span className="tnum text-[11px] text-[var(--color-faint)]">%</span>
+                </div>
+              </div>
+              <button onClick={convert}
+                className="w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-[13px] font-semibold transition-transform hover:scale-[1.01] active:scale-95"
+                style={{ background: "var(--color-mint)", color: "#08080b" }}>
+                Convert {cl(cFrom)} → {cl(cTo)}
+              </button>
+              {toast && <div className="text-[11px] tnum text-center" style={{ color: "var(--color-mint)" }}>✓ {toast}</div>}
+              <p className="text-[10.5px] text-[var(--color-faint)] leading-snug">
+                One-tap convert (e.g. USDC → USDT). Runs through the agent on its next cycle.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConvRow({ label, value, onChange, exclude }: { label: string; value: string; onChange: (v: string) => void; exclude?: string }) {
+  return (
+    <div className="panel px-3.5 py-2.5">
+      <div className="label mb-1.5">{label}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {CONV_TOKENS.filter((t) => t.sym !== exclude).map((t) => (
+          <button key={t.sym} onClick={() => onChange(t.sym)}
+            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] transition-colors"
+            style={{ color: value === t.sym ? "#08080b" : "var(--color-muted)", background: value === t.sym ? "var(--color-mint)" : "rgba(255,255,255,0.03)" }}>
+            <TokenIcon symbol={t.sym} size={13} />
+            {t.label}
+          </button>
+        ))}
       </div>
     </div>
   );

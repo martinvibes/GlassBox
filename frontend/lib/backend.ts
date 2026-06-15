@@ -167,6 +167,8 @@ export async function writeMandate(obj: Record<string, number>): Promise<void> {
 export async function writeCommand(obj: {
   action: string;
   symbol?: string;
+  from?: string;
+  to?: string;
   size_pct?: number;
   ts: string;
 }): Promise<void> {

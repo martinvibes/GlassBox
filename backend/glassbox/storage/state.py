@@ -75,3 +75,47 @@ def apply_paper_sell(
     pos.qty -= qty
     if pos.qty <= 1e-12:
         del portfolio.positions[symbol]
+
+
+def apply_paper_swap(
+    portfolio: Portfolio,
+    from_sym: str,
+    to_sym: str,
+    usd: float,
+    prices: dict[str, float],
+    base_currency: str,
+    fee_bps: float = 25,
+    slip_bps: float = 8,
+) -> tuple[float, float]:
+    """Generic paper swap of `usd` worth of `from_sym` into `to_sym`. Handles
+    base→token, token→base, and token→token uniformly. Returns (to_qty, to_price)."""
+    from_price = 1.0 if from_sym == base_currency else prices.get(from_sym, 0.0)
+    to_price = 1.0 if to_sym == base_currency else prices.get(to_sym, 0.0)
+    if from_price <= 0 or to_price <= 0 or usd <= 0:
+        return 0.0, to_price
+
+    if from_sym == base_currency:
+        portfolio.cash_usd -= usd
+    else:
+        pos = portfolio.positions.get(from_sym)
+        if pos:
+            pos.qty -= usd / from_price
+            if pos.qty <= 1e-12:
+                del portfolio.positions[from_sym]
+
+    fee = usd * fee_bps / 10_000
+    net = usd - fee
+    eff_to_price = to_price * (1 + slip_bps / 10_000)
+    to_qty = net / eff_to_price
+
+    if to_sym == base_currency:
+        portfolio.cash_usd += net
+    else:
+        existing = portfolio.positions.get(to_sym)
+        if existing:
+            new_qty = existing.qty + to_qty
+            existing.avg_price_usd = (existing.qty * existing.avg_price_usd + net) / new_qty
+            existing.qty = new_qty
+        else:
+            portfolio.positions[to_sym] = Position(symbol=to_sym, qty=to_qty, avg_price_usd=eff_to_price)
+    return to_qty, eff_to_price

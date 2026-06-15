@@ -2,6 +2,7 @@
 import { ArrowRight, ExternalLink, Receipt } from "lucide-react";
 import { usePolling } from "@/lib/usePolling";
 import { money, timeAgo } from "@/lib/format";
+import TokenIcon from "./TokenIcon";
 import type { DecisionRecord } from "@/lib/types";
 
 const BASE = "USDT";
@@ -30,9 +31,10 @@ export default function TxHistory() {
         )}
         {fills.map((r) => {
           const e = r.execution!;
-          const isBuy = e.action === "buy";
-          const from = isBuy ? BASE : e.symbol;
-          const to = isBuy ? e.symbol : BASE;
+          const isSwap = e.action === "swap";
+          const isBuy = e.action === "buy" || (isSwap && r.decision.from_symbol === BASE);
+          const from = (isSwap ? r.decision.from_symbol : isBuy ? BASE : e.symbol) || BASE;
+          const to = isSwap ? e.symbol : isBuy ? e.symbol : BASE;
           const tx = e.tx_hash ?? "";
           const isPaper = tx.startsWith("0xpaper") || e.venue === "paper";
           return (
@@ -51,8 +53,10 @@ export default function TxHistory() {
               </span>
 
               <div className="flex items-center gap-1.5 text-[13px] flex-1">
+                <TokenIcon symbol={from} size={18} />
                 <span className="text-[var(--color-fg)]">{from}</span>
                 <ArrowRight size={12} className="text-[var(--color-faint)]" />
+                <TokenIcon symbol={to} size={18} />
                 <span className="text-[var(--color-fg)]">{to}</span>
               </div>
 

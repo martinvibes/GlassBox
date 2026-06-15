@@ -7,6 +7,7 @@ const ACTION_COLOR: Record<Action, string> = {
   buy: "var(--color-mint)",
   sell: "var(--color-danger)",
   hold: "var(--color-faint)",
+  swap: "var(--color-cyan)",
 };
 
 function Sparkline({ series, up }: { series: { t: number; v: number }[]; up: boolean }) {

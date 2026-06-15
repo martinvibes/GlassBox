@@ -1,6 +1,7 @@
 "use client";
 import { motion } from "framer-motion";
 import { money, short } from "@/lib/format";
+import TokenIcon from "./TokenIcon";
 import type { Portfolio } from "@/lib/types";
 
 export default function Positions({
@@ -85,12 +86,7 @@ function Row({
   return (
     <div className="flex items-center justify-between py-2.5 border-b border-[var(--color-line)] last:border-0">
       <div className="flex items-center gap-3">
-        <div
-          className="h-7 w-7 rounded-full hairline flex items-center justify-center tnum text-[10px]"
-          style={{ color: accent }}
-        >
-          {name.slice(0, 3)}
-        </div>
+        <TokenIcon symbol={name} size={28} />
         <div>
           <div className="tnum text-[13px]">{name}</div>
           <div className="tnum text-[10px] text-[var(--color-faint)]">{tag}</div>

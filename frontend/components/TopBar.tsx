@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { RegimePill } from "./ui";
-import { short } from "@/lib/format";
+import DepositButton from "./DepositButton";
 import type { Regime } from "@/lib/types";
 
 export default function TopBar({
@@ -49,14 +49,14 @@ export default function TopBar({
           dot={live ? "var(--color-mint)" : undefined}
         />
         <Chip label="Cycles" value={String(cycles)} />
-        <Chip label="Wallet" value={short(wallet)} mono />
         <div
-          className="inline-flex items-center gap-2 rounded-full px-3.5 py-2 hairline"
+          className="hidden xl:inline-flex items-center gap-2 rounded-full px-3.5 py-2 hairline"
           style={{ background: "rgba(255,255,255,0.02)" }}
         >
           <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-mint)] live-dot" />
           <span className="tnum text-[12.5px] text-[var(--color-muted)]">{clock} UTC</span>
         </div>
+        <DepositButton />
       </div>
     </motion.header>
   );

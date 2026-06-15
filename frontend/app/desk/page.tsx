@@ -2,14 +2,9 @@
 import { motion } from "framer-motion";
 import { usePolling } from "@/lib/usePolling";
 import TopBar from "@/components/TopBar";
-import DrawdownGauge from "@/components/DrawdownGauge";
 import TradingViewChart from "@/components/TradingViewChart";
 import AgentConsole from "@/components/AgentConsole";
-import EquityChart from "@/components/EquityChart";
-import ReasoningFeed from "@/components/ReasoningFeed";
-import Positions from "@/components/Positions";
-import WalletPanel from "@/components/WalletPanel";
-import TxHistory from "@/components/TxHistory";
+import DeskTabs from "@/components/DeskTabs";
 import { money, signedPct } from "@/lib/format";
 import type { StatePayload } from "@/lib/types";
 
@@ -39,8 +34,8 @@ export default function Page() {
   const pnlColor = up ? "var(--color-mint)" : "var(--color-danger)";
 
   return (
-    <main className="relative min-h-screen px-4 md:px-6 py-5 max-w-[1560px] mx-auto z-10">
-      <div className="grid-atmos fixed inset-0 -z-10 opacity-30" />
+    <main className="relative min-h-screen px-4 md:px-6 py-5 max-w-[1480px] mx-auto z-10">
+      <div className="grid-atmos fixed inset-0 -z-10 opacity-25" />
 
       <TopBar
         regime={data?.regime ?? "unknown"}
@@ -59,64 +54,37 @@ export default function Page() {
         <Ribbon label="cycles" value={String(data?.cycles ?? 0)} sub="decisions logged" accent="var(--color-cyan)" delay={0.24} />
       </section>
 
-      {/* ── TRADE SURFACE ── */}
+      {/* ── TRADE SURFACE: chart + agent console ── */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-4 mt-4">
-        <Cell className="lg:col-span-8 h-[440px] lg:h-[540px]" delay={0.1}>
+        <Cell className="lg:col-span-8 h-[440px] lg:h-[560px]" delay={0.1}>
           <TradingViewChart />
         </Cell>
-        <Cell className="lg:col-span-4 h-[540px]" delay={0.16}>
+        <Cell className="lg:col-span-4 h-[560px]" delay={0.16}>
           <AgentConsole />
         </Cell>
       </section>
 
-      {/* ── INTELLIGENCE: reasoning feed + survival gauge ── */}
-      <section className="grid grid-cols-1 lg:grid-cols-12 gap-4 mt-4">
-        <Cell className="lg:col-span-8 h-[440px]" delay={0.2}>
-          <ReasoningFeed />
-        </Cell>
-        <Cell className="lg:col-span-4 h-[440px]" delay={0.24}>
-          <div className="glass h-full p-6 flex flex-col items-center justify-center relative overflow-hidden">
-            <span className="absolute top-5 left-6 label">survival monitor</span>
-            <div className="scale-[0.92] origin-center">
-              <DrawdownGauge dd={dd} ceiling={ceiling} cap={cap} />
-            </div>
-            <div className="flex items-center gap-2 mt-3">
-              <Chip label={`flatten ${ceiling}%`} color="var(--color-amber)" />
-              <Chip label={`DQ ${cap}%`} color="var(--color-danger)" />
-            </div>
-            <p className="text-[12px] text-[var(--color-muted)] text-center mt-3 max-w-[280px] leading-snug">
-              Auto-flattens far inside the line. <span className="text-[var(--color-mint)]">Survival is the alpha.</span>
-            </p>
-          </div>
-        </Cell>
-      </section>
+      {/* ── TABBED PANEL: reasoning · trades · positions · performance ── */}
+      <motion.section
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, delay: 0.22, ease: [0.16, 1, 0.3, 1] }}
+        className="mt-6"
+      >
+        <DeskTabs
+          portfolio={data?.portfolio ?? null}
+          prices={prices}
+          wallet={data?.wallet ?? null}
+          agentId={data?.agentId ?? null}
+          equitySeries={data?.equitySeries ?? []}
+          start={start}
+          dd={dd}
+          ceiling={ceiling}
+          cap={cap}
+        />
+      </motion.section>
 
-      {/* ── WALLET + LEDGER ── */}
-      <section className="grid grid-cols-1 lg:grid-cols-12 gap-4 mt-4">
-        <Cell className="lg:col-span-4 h-[420px]" delay={0.28}>
-          <WalletPanel />
-        </Cell>
-        <Cell className="lg:col-span-8 h-[420px]" delay={0.32}>
-          <TxHistory />
-        </Cell>
-      </section>
-
-      {/* ── HOLDINGS + EQUITY CURVE ── */}
-      <section className="grid grid-cols-1 lg:grid-cols-12 gap-4 mt-4 mb-8">
-        <Cell className="lg:col-span-4 h-[300px]" delay={0.36}>
-          <Positions
-            portfolio={data?.portfolio ?? null}
-            prices={prices}
-            wallet={data?.wallet ?? null}
-            agentId={data?.agentId ?? null}
-          />
-        </Cell>
-        <Cell className="lg:col-span-8 h-[300px]" delay={0.4}>
-          <EquityChart series={data?.equitySeries ?? []} start={start} />
-        </Cell>
-      </section>
-
-      <footer className="text-center label py-5 opacity-50">
+      <footer className="text-center label py-6 opacity-50">
         GlassBox · transparent · risk-gated · BNB HACK Track 1 · the model proposes, the gate disposes
       </footer>
     </main>
@@ -154,16 +122,5 @@ function Ribbon({
       </div>
       {sub && <div className="text-[10.5px] text-[var(--color-faint)] mt-1.5 tnum">{sub}</div>}
     </motion.div>
-  );
-}
-
-function Chip({ label, color }: { label: string; color: string }) {
-  return (
-    <span
-      className="tnum text-[10px] px-2 py-0.5 rounded-full"
-      style={{ color, background: `${color}1a` }}
-    >
-      {label}
-    </span>
   );
 }

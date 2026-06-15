@@ -9,6 +9,7 @@ import WalletPanel from "./WalletPanel";
 
 export default function DepositButton() {
   const { data } = usePolling<{ totalUsd?: number; funded?: boolean }>("/api/wallet", 12000);
+  const { data: state } = usePolling<{ mode?: string; equity?: number }>("/api/state", 5000);
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -19,7 +20,10 @@ export default function DepositButton() {
     return () => document.removeEventListener("keydown", k);
   }, [open]);
 
-  const total = data?.totalUsd ?? 0;
+  const isPaper = (state?.mode ?? "paper") !== "live";
+  // pill reflects what the button opens to: the paper trading balance in paper
+  // mode, the real on-chain balance in live mode.
+  const total = isPaper ? (state?.equity ?? 0) : (data?.totalUsd ?? 0);
   const funded = !!data?.funded;
 
   const modal = (

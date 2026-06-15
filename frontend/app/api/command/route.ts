@@ -18,6 +18,7 @@ export async function POST(req: Request) {
     from: String(body.from ?? "").toUpperCase(),
     to: String(body.to ?? "").toUpperCase(),
     size_pct: Math.max(0, Math.min(100, Number(body.size_pct ?? 0))),
+    amount_usd: Math.max(0, Number(body.amount_usd ?? 0)),
     ts: `${Date.now()}`,
   };
   await writeCommand(cmd);

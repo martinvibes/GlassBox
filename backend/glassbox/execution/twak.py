@@ -116,6 +116,17 @@ class Executor:
             amount = portfolio.positions[sym].qty                # token units
             from_asset, to_asset = asset(sym), asset(base)
 
+        # cost basis for the closed leg, so we can book realized P&L on a SELL
+        cost_basis_usd = (
+            amount * portfolio.positions[sym].avg_price_usd
+            if decision.action == Action.SELL and sym in portfolio.positions else None
+        )
+
+        def _with_realized(r: ExecutionResult) -> ExecutionResult:
+            if cost_basis_usd is not None and r.ok:
+                r.realized_pnl_usd = round(r.notional_usd - cost_basis_usd, 2)
+            return r
+
         # 1. quote first (no signing) — fail fast on routing/slippage issues
         quote = self.cli.swap(amount, from_asset, to_asset, slippage_pct,
                               quote_only=True, password=None)
@@ -137,7 +148,7 @@ class Executor:
             res = self._parse_swap_result(decision, sym, amount, quote.raw, prices_usd)
             res.venue = "pancakeswap(dry-run)"
             res.tx_hash = None
-            return res
+            return _with_realized(res)
 
         # 2. execute the real swap (signs locally) — THIS BROADCASTS ON-CHAIN
         res = self.cli.swap(amount, from_asset, to_asset, slippage_pct,
@@ -147,7 +158,7 @@ class Executor:
                 ok=False, action=decision.action, symbol=sym, venue="pancakeswap",
                 error=f"swap failed: {res.error}",
             )
-        return self._parse_swap_result(decision, sym, amount, res.raw, prices_usd)
+        return _with_realized(self._parse_swap_result(decision, sym, amount, res.raw, prices_usd))
 
     def _parse_swap_result(
         self, decision: GateDecision, sym: str, amount: float, raw: dict,
@@ -199,12 +210,12 @@ class Executor:
         if decision.action == Action.SWAP:
             from_sym, to_sym = decision.from_symbol, decision.symbol
             usd = decision.approved_notional_usd
-            to_qty, to_price = state_store.apply_paper_swap(
+            to_qty, to_price, realized = state_store.apply_paper_swap(
                 portfolio, from_sym, to_sym, usd, prices_usd,
                 self.s.base_currency, _PAPER_FEE_BPS, _PAPER_SLIP_BPS,
             )
             fee = usd * _PAPER_FEE_BPS / 10_000
-            return self._result(Action.SWAP, to_sym, to_qty, to_price, usd, fee)
+            return self._result(Action.SWAP, to_sym, to_qty, to_price, usd, fee, realized)
 
         sym = decision.symbol
         mark = prices_usd.get(sym, 0.0)
@@ -234,15 +245,16 @@ class Executor:
         gross = qty * fill_price
         fee = gross * _PAPER_FEE_BPS / 10_000
         proceeds = gross - fee
-        state_store.apply_paper_sell(portfolio, sym, qty, fill_price, proceeds)
-        return self._result(decision.action, sym, qty, fill_price, proceeds, fee)
+        realized = state_store.apply_paper_sell(portfolio, sym, qty, fill_price, proceeds)
+        return self._result(decision.action, sym, qty, fill_price, proceeds, fee, realized)
 
     @staticmethod
-    def _result(action, sym, qty, price, notional, fee) -> ExecutionResult:
+    def _result(action, sym, qty, price, notional, fee, realized=0.0) -> ExecutionResult:
         seed = f"{action}:{sym}:{qty:.8f}:{price:.6f}:{notional:.4f}".encode()
         fake_tx = "0xpaper" + hashlib.sha256(seed).hexdigest()[:58]
         return ExecutionResult(
             ok=True, action=action, symbol=sym, filled_qty=round(qty, 10),
             fill_price_usd=round(price, 6), notional_usd=round(notional, 2),
-            fee_usd=round(fee, 4), tx_hash=fake_tx, venue="paper",
+            fee_usd=round(fee, 4), realized_pnl_usd=round(realized, 2),
+            tx_hash=fake_tx, venue="paper",
         )

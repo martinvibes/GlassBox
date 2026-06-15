@@ -8,6 +8,7 @@ import {
   readControl,
   readMandate,
   readPendingCommand,
+  readRuntime,
 } from "@/lib/backend";
 import type { Regime, StatePayload } from "@/lib/types";
 
@@ -15,7 +16,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET() {
-  const [decisions, portfolio, agentId, env, caps, control, mandate] = await Promise.all([
+  const [decisions, portfolio, agentId, env, caps, control, mandate, runtime] = await Promise.all([
     readDecisions(),
     readPortfolio(),
     readAgentId(),
@@ -23,8 +24,18 @@ export async function GET() {
     readRulebookCaps(),
     readControl(),
     readMandate(),
+    readRuntime(),
   ]);
   const pendingCommand = await readPendingCommand();
+
+  // DCA schedule: when the next scheduled buy is due (last run + interval)
+  let dcaNextRun: number | null = null;
+  if (control.mode === "dca" && control.dca?.interval_hours) {
+    const intervalMs = control.dca.interval_hours * 3600_000;
+    dcaNextRun = runtime.dca_last_run
+      ? new Date(runtime.dca_last_run).getTime() + intervalMs
+      : Date.now(); // never run → due now (fires next cycle)
+  }
 
   // effective config = rulebook defaults overlaid with the dashboard mandate
   const eff = {
@@ -67,6 +78,7 @@ export async function GET() {
     paused: control.paused,
     agentMode: control.mode,
     dca: control.dca ?? null,
+    dcaNextRun,
     pendingCommand,
     regime,
     fearGreed: latest?.signals.fear_greed ?? null,

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import {
-  Play, Pause, ShieldCheck, Repeat, XCircle, ArrowRight, ArrowDownUp, ChevronDown, Loader2,
+  Play, Pause, ShieldCheck, Repeat, XCircle, ChevronDown, Loader2,
 } from "lucide-react";
 import { usePolling } from "@/lib/usePolling";
 import { money } from "@/lib/format";
@@ -23,24 +23,12 @@ const TOKENS = [
   { label: "SOL", sym: "SOL" },
   { label: "CAKE", sym: "CAKE" },
 ];
-// full set (incl. stablecoins) for the manual Swap — any → any
-const SWAP_TOKENS = [
-  { label: "USDC", sym: "USDC" },
-  { label: "USDT", sym: "USDT" },
-  { label: "BNB", sym: "WBNB" },
-  { label: "BTC", sym: "BTCB" },
-  { label: "ETH", sym: "ETH" },
-  { label: "SOL", sym: "SOL" },
-  { label: "CAKE", sym: "CAKE" },
-];
-const lbl = (sym: string) => SWAP_TOKENS.find((t) => t.sym === sym)?.label ?? sym;
 const INTERVALS = [
   { label: "1h", h: 1 },
   { label: "6h", h: 6 },
   { label: "12h", h: 12 },
   { label: "24h", h: 24 },
 ];
-const BASE = "USDT";
 const label = (sym: string) => TOKENS.find((t) => t.sym === sym)?.label ?? sym;
 
 export default function AgentConsole() {
@@ -53,7 +41,6 @@ export default function AgentConsole() {
   const [dcaTok, setDcaTok] = useState("WBNB");
   const [dcaAmt, setDcaAmt] = useState(25);
   const [dcaInt, setDcaInt] = useState(6);
-  const [manFrom, setManFrom] = useState("USDT");
   const [manTo, setManTo] = useState("WBNB");
   const [manPct, setManPct] = useState(10);
   const [m, setM] = useState<{ ceiling: number; pos: number; conv: number; trades: number } | null>(null);
@@ -102,7 +89,15 @@ export default function AgentConsole() {
           const v = rec?.decision?.verdict;
           if (e?.ok && e.notional_usd > 0) {
             const act = (e.action ?? "").toUpperCase();
-            toast.update(id, "success", `${act} filled · ${money(e.notional_usd)} of ${label(e.symbol)}`);
+            const realized = e.realized_pnl_usd ?? 0;
+            const isClose = (e.action === "sell" || e.action === "swap") && Math.abs(realized) > 0.004;
+            if (isClose) {
+              const up = realized >= 0;
+              toast.update(id, up ? "success" : "info",
+                `Closed ${label(e.symbol)} · ${up ? "+" : "−"}${money(Math.abs(realized))} ${up ? "profit" : "loss"}`);
+            } else {
+              toast.update(id, "success", `${act} filled · ${money(e.notional_usd)} of ${label(e.symbol)}`);
+            }
           } else {
             const why = rec?.decision?.reasons?.[0] ?? "rejected by the gate";
             toast.update(id, "error", v === "block" ? `Blocked — ${why}` : `Not filled — ${why}`);
@@ -146,6 +141,19 @@ export default function AgentConsole() {
   const pending = data?.pendingCommand ?? null;
   const equity = data?.equity ?? 1000;
   const manUsd = (equity * manPct) / 100;
+  const positions = data?.portfolio?.positions ?? {};
+  const heldTo = !!positions[manTo];          // do we hold the selected token?
+  const anyPos = Object.keys(positions).length > 0;
+  const dcaNext = data?.dcaNextRun ?? null;
+  const dcaArmed = data?.agentMode === "dca" && !!data?.dca?.token;
+  const nextBuyLabel = (() => {
+    if (!dcaNext) return null;
+    const ms = dcaNext - Date.now();
+    if (ms <= 0) return "due now";
+    const h = Math.floor(ms / 3_600_000);
+    const m = Math.floor((ms % 3_600_000) / 60_000);
+    return h > 0 ? `in ${h}h ${m}m` : `in ${m}m`;
+  })();
 
   return (
     <div className="glass flex flex-col h-full overflow-hidden">
@@ -216,6 +224,21 @@ export default function AgentConsole() {
         {/* DCA */}
         {mode === "dca" && (
           <div className="flex flex-col gap-3">
+            {dcaArmed && (
+              <div className="panel px-4 py-3 flex items-center justify-between"
+                style={{ background: "rgba(78,230,168,0.05)" }}>
+                <div>
+                  <div className="label" style={{ color: "var(--color-mint)" }}>dca active</div>
+                  <div className="text-[12.5px] mt-1 tnum">
+                    buy {label(data?.dca?.token ?? "")} ${data?.dca?.amount_usd} · every {data?.dca?.interval_hours}h
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="label">next buy</div>
+                  <div className="tnum text-[14px] mt-1" style={{ color: "var(--color-mint)" }}>{nextBuyLabel ?? "—"}</div>
+                </div>
+              </div>
+            )}
             <Field label="token"><TokenSelect value={dcaTok} onChange={setDcaTok} /></Field>
             <Field label="buy amount">
               <div className="flex items-center gap-2">
@@ -264,15 +287,21 @@ export default function AgentConsole() {
                 style={{ background: "var(--color-mint)", color: "#08080b" }}>
                 Buy {label(manTo)}
               </button>
-              <button onClick={() => sendCommand("sell", manTo)}
-                className="flex items-center justify-center gap-1.5 rounded-xl py-3 text-[14px] font-semibold transition-transform hover:scale-[1.02] active:scale-95"
+              <button onClick={() => sendCommand("sell", manTo)} disabled={!heldTo}
+                className="flex items-center justify-center gap-1.5 rounded-xl py-3 text-[14px] font-semibold transition-transform enabled:hover:scale-[1.02] active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{ background: "rgba(255,93,108,0.14)", color: "var(--color-danger)" }}>
                 Sell {label(manTo)}
               </button>
             </div>
-            <button onClick={() => sendCommand("flatten")}
-              className="w-full flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[13px] hairline text-[var(--color-muted)] hover:text-[var(--color-danger)] transition-colors">
-              <XCircle size={14} /> Close all positions
+            {!heldTo && (
+              <p className="text-[11px] text-[var(--color-faint)] leading-snug -mt-1">
+                No open {label(manTo)} position — <span className="text-[var(--color-muted)]">Buy</span> first to open one, then Sell to close.
+              </p>
+            )}
+            <button onClick={() => sendCommand("flatten")} disabled={!anyPos}
+              className="w-full flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[13px] hairline text-[var(--color-muted)] enabled:hover:text-[var(--color-danger)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title={anyPos ? "Close every open position" : "No open positions to close"}>
+              <XCircle size={14} /> Close all positions{anyPos ? ` (${Object.keys(positions).length})` : ""}
             </button>
             <p className="label" style={{ letterSpacing: "0.1em" }}>routed through the gate · fills in seconds</p>
           </div>
@@ -321,47 +350,11 @@ export default function AgentConsole() {
   );
 }
 
-function SwapPreview({ from, to, note }: { from: string; to: string; note: string }) {
-  return (
-    <div className="flex items-center justify-between panel px-4 py-2.5">
-      <div className="flex items-center gap-2 text-[13px]">
-        <TokenIcon symbol={from} size={18} />
-        <span className="text-[var(--color-muted)]">{from}</span>
-        <ArrowRight size={13} className="text-[var(--color-mint)]" />
-        <TokenIcon symbol={to} size={18} />
-        <span className="text-[var(--color-fg)]">{to}</span>
-      </div>
-      <span className="label">{note}</span>
-    </div>
-  );
-}
-
 function Field({ label: l, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="panel px-4 py-2.5">
       <div className="label mb-1.5">{l}</div>
       {children}
-    </div>
-  );
-}
-
-function TokenChips({ value, onChange, exclude }: { value: string; onChange: (v: string) => void; exclude?: string }) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {SWAP_TOKENS.filter((t) => t.sym !== exclude).map((t) => (
-        <button
-          key={t.sym}
-          onClick={() => onChange(t.sym)}
-          className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11.5px] transition-colors"
-          style={{
-            color: value === t.sym ? "#08080b" : "var(--color-muted)",
-            background: value === t.sym ? "var(--color-mint)" : "rgba(255,255,255,0.03)",
-          }}
-        >
-          <TokenIcon symbol={t.sym} size={14} />
-          {t.label}
-        </button>
-      ))}
     </div>
   );
 }

@@ -168,6 +168,19 @@ input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 
+/* interactive affordance — Tailwind v4 preflight drops the default button pointer */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+a[href],
+summary,
+label[for],
+select,
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] { cursor: pointer; }
+button:disabled,
+[aria-disabled="true"] { cursor: not-allowed; }
+
 /* ── logo marquee (seamless infinite left scroll) ───────────────────────── */
 @keyframes marquee-left {
   from { transform: translateX(0); }

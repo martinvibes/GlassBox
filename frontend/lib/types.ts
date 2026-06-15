@@ -45,6 +45,7 @@ export interface Execution {
   fill_price_usd: number;
   notional_usd: number;
   fee_usd: number;
+  realized_pnl_usd: number;
   tx_hash: string | null;
   venue: string;
   error: string | null;
@@ -74,6 +75,7 @@ export interface Portfolio {
   cash_usd: number;
   positions: Record<string, Position>;
   high_water_mark_usd: number;
+  realized_pnl_usd?: number;
 }
 
 export interface StatePayload {
@@ -95,6 +97,7 @@ export interface StatePayload {
   paused: boolean;
   agentMode: "autonomous" | "dca" | "manual";
   dca: { token?: string; amount_usd?: number; interval_hours?: number } | null;
+  dcaNextRun: number | null;
   pendingCommand: { action: string; symbol: string } | null;
   regime: Regime;
   fearGreed: number | null;

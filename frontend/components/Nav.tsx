@@ -11,6 +11,7 @@ const LINKS = [
   { href: "/", label: "Overview" },
   { href: "/desk", label: "Desk" },
   { href: "/strategy", label: "Strategy" },
+  { href: "/doc", label: "Docs" },
 ];
 
 export default function Nav() {

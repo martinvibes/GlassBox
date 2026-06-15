@@ -68,6 +68,7 @@ class Portfolio(BaseModel):
     cash_usd: float = 0.0                          # base-currency balance, in USD
     positions: dict[str, Position] = Field(default_factory=dict)
     high_water_mark_usd: float = 0.0               # peak equity ever seen
+    realized_pnl_usd: float = 0.0                  # cumulative booked P&L over the session
 
     def equity_usd(self, prices_usd: dict[str, float]) -> float:
         eq = self.cash_usd
@@ -129,6 +130,7 @@ class ExecutionResult(BaseModel):
     fill_price_usd: float = 0.0
     notional_usd: float = 0.0
     fee_usd: float = 0.0
+    realized_pnl_usd: float = 0.0                   # P&L booked on a CLOSE (sell/convert-out): +profit / −loss
     tx_hash: Optional[str] = None
     venue: str = "paper"                            # paper | pancakeswap | bsc_perp
     error: Optional[str] = None

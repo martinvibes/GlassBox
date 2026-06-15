@@ -71,6 +71,12 @@ class Orchestrator:
 
         # 1. perceive
         signals: Signals = self.perception.fetch()
+        # Perception only quotes volatile tokens. Peg every allowlisted stablecoin
+        # at $1 so the gate, paper-swap, and mark-to-market can value non-base
+        # stables (e.g. USDC) — otherwise a USDC swap fails with "no mark price".
+        for _sym, _tok in self.s.allowlist.items():
+            if getattr(_tok, "is_stable", False):
+                signals.prices_usd.setdefault(_sym, 1.0)
         equity = self.portfolio.equity_usd(signals.prices_usd)
 
         # 2. decide the proposal. A pending one-shot user command (manual trade /
@@ -147,10 +153,18 @@ class Orchestrator:
 
     def _activity_probe(self, signals: Signals) -> TradeProposal | None:
         """A deliberately tiny keep-alive trade to satisfy the activity floor.
-        Only in a non-risk_off regime, into the most liquid non-stable token."""
+        Only when FLAT (real momentum trades already satisfy activity when deployed)
+        and in a non-risk_off regime, into the most liquid non-stable token."""
         from glassbox.models import Regime
 
         if signals.regime == Regime.RISK_OFF:
+            return None
+        # already holding a volatile position → we're active; no keep-alive needed
+        holds_volatile = any(
+            s not in self.s.allowlist or not self.s.allowlist[s].is_stable
+            for s in self.portfolio.positions
+        )
+        if holds_volatile:
             return None
         candidates = [
             s for s, b in (signals.tokens or {}).items()
@@ -186,11 +200,18 @@ class Orchestrator:
         if action == "swap":
             from_sym = str(cmd.get("from", "")).upper()
             to_sym = str(cmd.get("to", "")).upper()
-            size_pct = float(cmd.get("size_pct", 0.0))
+            # prefer an absolute USD amount (convert-by-amount UI); fall back to %.
+            amount_usd = float(cmd.get("amount_usd", 0.0) or 0.0)
+            size_pct = float(cmd.get("size_pct", 0.0) or 0.0)
+            if amount_usd > 0 and equity > 0:
+                size_pct = amount_usd / equity * 100.0
+                amt_note = f"${amount_usd:.2f}"
+            else:
+                amt_note = f"~{size_pct:.0f}% equity"
             return TradeProposal(
                 action=Action.SWAP, symbol=from_sym, to_symbol=to_sym,
                 size_pct=size_pct, conviction=1.0, directed=True,
-                rationale=f"manual swap {from_sym} → {to_sym} (~{size_pct:.0f}% equity) from console.",
+                rationale=f"manual convert {from_sym} → {to_sym} ({amt_note}) from console.",
                 proposed_regime=signals.regime, source="manual",
             ), runtime
 
@@ -268,6 +289,16 @@ class Orchestrator:
             return False
         return ts != control.read_runtime(self.s.data_dir).get("command_last_ts")
 
+    def _consume_pending_command(self) -> None:
+        """Mark the current command consumed (used after a cycle error so a poison
+        command can't retry-loop forever)."""
+        cmd = control.read_command(self.s.data_dir)
+        ts = cmd.get("ts")
+        if ts:
+            runtime = control.read_runtime(self.s.data_dir)
+            runtime["command_last_ts"] = ts
+            control.write_runtime(self.s.data_dir, runtime)
+
     def run_forever(self) -> None:
         print(f"GlassBox running in {self.s.mode.upper()} mode "
               f"(heartbeat {self.s.heartbeat_seconds}s, polling 5s). Ctrl-C to stop.\n")
@@ -279,7 +310,16 @@ class Orchestrator:
                 due = (now - last_heartbeat) >= self.s.heartbeat_seconds
                 # run immediately on a pending manual command, else on the heartbeat
                 if due or self._command_pending():
-                    self.run_cycle()
+                    try:
+                        self.run_cycle()
+                    except Exception as exc:  # one bad cycle must never kill the loop
+                        import traceback
+                        print(f"⚠ cycle error (continuing): {type(exc).__name__}: {exc}")
+                        traceback.print_exc()
+                        # a manual command is marked consumed inside run_cycle before
+                        # execution, so a poison command won't retry-loop; but guard
+                        # anyway by advancing the consumed marker.
+                        self._consume_pending_command()
                     last_heartbeat = now
                 time.sleep(poll)
         except KeyboardInterrupt:

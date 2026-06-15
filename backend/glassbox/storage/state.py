@@ -66,15 +66,19 @@ def apply_paper_buy(
 
 def apply_paper_sell(
     portfolio: Portfolio, symbol: str, qty: float, fill_price: float, proceeds: float
-) -> None:
-    """Remove up to `qty` of `symbol`, credit `proceeds` to cash."""
+) -> float:
+    """Remove up to `qty` of `symbol`, credit `proceeds` to cash. Returns realized
+    P&L (net `proceeds` minus the cost basis of the sold quantity)."""
     portfolio.cash_usd += proceeds
     if symbol not in portfolio.positions:
-        return
+        return 0.0
     pos = portfolio.positions[symbol]
+    realized = proceeds - qty * pos.avg_price_usd
+    portfolio.realized_pnl_usd += realized
     pos.qty -= qty
     if pos.qty <= 1e-12:
         del portfolio.positions[symbol]
+    return realized
 
 
 def apply_paper_swap(
@@ -86,20 +90,26 @@ def apply_paper_swap(
     base_currency: str,
     fee_bps: float = 25,
     slip_bps: float = 8,
-) -> tuple[float, float]:
+) -> tuple[float, float, float]:
     """Generic paper swap of `usd` worth of `from_sym` into `to_sym`. Handles
-    base→token, token→base, and token→token uniformly. Returns (to_qty, to_price)."""
+    base→token, token→base, and token→token uniformly. Returns
+    (to_qty, to_price, realized_pnl) — realized is booked when the FROM leg is a
+    token being sold (its proceeds vs cost basis); 0 when converting out of cash."""
     from_price = 1.0 if from_sym == base_currency else prices.get(from_sym, 0.0)
     to_price = 1.0 if to_sym == base_currency else prices.get(to_sym, 0.0)
     if from_price <= 0 or to_price <= 0 or usd <= 0:
-        return 0.0, to_price
+        return 0.0, to_price, 0.0
 
+    realized = 0.0
     if from_sym == base_currency:
         portfolio.cash_usd -= usd
     else:
         pos = portfolio.positions.get(from_sym)
         if pos:
-            pos.qty -= usd / from_price
+            sold_qty = usd / from_price
+            realized = usd - sold_qty * pos.avg_price_usd
+            portfolio.realized_pnl_usd += realized
+            pos.qty -= sold_qty
             if pos.qty <= 1e-12:
                 del portfolio.positions[from_sym]
 
@@ -118,4 +128,4 @@ def apply_paper_swap(
             existing.qty = new_qty
         else:
             portfolio.positions[to_sym] = Position(symbol=to_sym, qty=to_qty, avg_price_usd=eff_to_price)
-    return to_qty, eff_to_price
+    return to_qty, eff_to_price, realized

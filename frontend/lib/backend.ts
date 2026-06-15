@@ -141,6 +141,16 @@ export async function readPendingCommand(): Promise<{ action: string; symbol: st
   }
 }
 
+export async function readRuntime(): Promise<{ dca_last_run?: string; command_last_ts?: string }> {
+  const raw = await readText(path.join(DATA, "agent_runtime.json"));
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
 export async function readMandate(): Promise<Record<string, number>> {
   const raw = await readText(path.join(DATA, "mandate.json"));
   if (!raw) return {};

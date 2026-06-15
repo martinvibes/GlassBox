@@ -20,15 +20,24 @@ sizing:
   max_position_pct: 25.0       # max % of equity in a single token position
   max_gross_exposure_pct: 60.0 # max % of equity deployed across all positions at once
   max_trade_pct: 15.0          # max % of equity moved in a single trade
-  min_trade_usd: 25.0          # don't bother below this (fees dominate)
+  min_trade_usd: 1.0           # floor: trade as little as $1 (parity with retail desks)
+
+exits:
+  # Lock in small wins fast, cut losers fast. A green trade is a CLOSED trade —
+  # over a few-trade window, banking many small gains beats swinging for a moonshot
+  # (and every position closed to stablecoin is risk we can't give back). The
+  # reasoner enforces these deterministically on every open position, every cycle.
+  take_profit_pct: 1.5         # +1.5% on a position → take profit, return to cash
+  stop_loss_pct: 3.0           # −3.0% on a position → cut it, well inside the DD ceiling
+  min_hold_minutes: 0          # no minimum hold; exits may fire the next cycle
 
 limits:
-  max_trades_per_day: 6        # avoid churn / fee bleed
-  trade_cooldown_minutes: 30   # min gap between executed trades
+  max_trades_per_day: 30       # headroom for active rotation (cooldown + caps still bound it)
+  trade_cooldown_minutes: 3    # min gap between AI BUYs (exits/sells are never cooled down)
   max_slippage_bps: 80         # reject if quoted slippage exceeds this (0.80%)
 
 conviction:
-  min_score_to_enter: 0.62     # LLM/heuristic conviction floor to OPEN a position (0..1)
+  min_score_to_enter: 0.55     # LLM/heuristic conviction floor to OPEN a position (0..1)
   min_score_to_add: 0.72       # higher bar to ADD to an existing position
 
 activity:
@@ -38,12 +47,13 @@ activity:
   activity_trade_max_pct: 3.0  # a forced "keep-alive" trade is tiny by design
 
 # Regime postures map a perceived market regime → how aggressive we may be.
-# FLAT is the default and safest. The gate clamps proposals to the posture.
+# The gate clamps proposals to the posture. Only true capitulation (risk_off) fully
+# stands the agent down; every other regime deploys, sized by conviction + these caps.
 regimes:
-  risk_off:    { max_gross_exposure_pct: 0.0,  note: "stay in stablecoin" }
-  neutral:     { max_gross_exposure_pct: 20.0, note: "tiny probes only" }
-  risk_on:     { max_gross_exposure_pct: 50.0, note: "deploy on conviction" }
-  euphoria:    { max_gross_exposure_pct: 30.0, note: "trim into strength, fade froth" }
+  risk_off:    { max_gross_exposure_pct: 0.0,  note: "capitulation → stay in stablecoin" }
+  neutral:     { max_gross_exposure_pct: 35.0, note: "trade small, disciplined probes" }
+  risk_on:     { max_gross_exposure_pct: 60.0, note: "deploy on conviction" }
+  euphoria:    { max_gross_exposure_pct: 45.0, note: "ride strength, fade froth carefully" }
 
 defaults:
-  posture: risk_off            # when regime is unknown, assume the worst
+  posture: neutral             # unknown regime → trade small (not fully flat)

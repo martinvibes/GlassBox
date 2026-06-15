@@ -19,16 +19,26 @@ function fngLabel(v: number | null): string {
 
 export default function Page() {
   const { data } = usePolling<StatePayload>("/api/state", 5000);
+  // live marks (refreshes every 5s) so open positions update in real time —
+  // the decision log only carries prices from the agent's slow heartbeat.
+  const { data: live } = usePolling<{ prices: Record<string, number> }>("/api/prices", 5000);
 
-  const equity = data?.equity ?? 1000;
+  // live marks override the stale decision-log prices
+  const prices = { ...(data?.latest?.signals.prices_usd ?? {}), ...(live?.prices ?? {}) };
+
+  // recompute equity + drawdown off live marks so the whole ribbon tracks price
+  const portfolio = data?.portfolio ?? null;
+  const equity = portfolio
+    ? portfolio.cash_usd + Object.values(portfolio.positions).reduce((s, p) => s + p.qty * (prices[p.symbol] ?? p.avg_price_usd), 0)
+    : (data?.equity ?? 1000);
   const start = data?.startEquity ?? 1000;
   const pnl = equity - start;
   const pnlPct = start > 0 ? (pnl / start) * 100 : 0;
   const up = pnl >= 0;
-  const dd = data?.drawdownPct ?? 0;
+  const hwm = Math.max(portfolio?.high_water_mark_usd ?? equity, equity);
+  const dd = hwm > 0 ? Math.max(0, ((hwm - equity) / hwm) * 100) : (data?.drawdownPct ?? 0);
   const ceiling = data?.internalCeilingPct ?? 12;
   const cap = data?.competitionCapPct ?? 30;
-  const prices = data?.latest?.signals.prices_usd ?? {};
   const fng = data?.fearGreed ?? null;
   const regime = (data?.regime ?? "unknown").replace("_", "-");
   const pnlColor = up ? "var(--color-mint)" : "var(--color-danger)";

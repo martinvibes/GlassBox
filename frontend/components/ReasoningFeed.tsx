@@ -1,6 +1,6 @@
 "use client";
 import { AnimatePresence, motion } from "framer-motion";
-import { CheckCircle2, ExternalLink } from "lucide-react";
+import { CheckCircle2, ExternalLink, TrendingUp, TrendingDown } from "lucide-react";
 import { usePolling } from "@/lib/usePolling";
 import { VerdictChip } from "./ui";
 import { timeAgo } from "@/lib/format";
@@ -85,21 +85,39 @@ export default function ReasoningFeed() {
                   </div>
                 )}
 
-                {filled && (
-                  <div className="flex items-center gap-1.5 mt-2 w-fit px-2.5 py-1 rounded-full"
-                    style={{ background: "rgba(78,230,168,0.1)", color: "var(--color-mint)" }}>
-                    <CheckCircle2 size={12} />
-                    <span className="tnum text-[10.5px]">
-                      filled {r.execution!.action} {pl(r.execution!.symbol)} · ${r.execution!.notional_usd.toFixed(2)} @ {r.execution!.fill_price_usd}
-                    </span>
-                    {r.execution!.tx_hash && r.execution!.venue !== "paper" && (
-                      <a href={`https://bscscan.com/tx/${r.execution!.tx_hash}`} target="_blank" rel="noreferrer"
-                        className="inline-flex items-center opacity-70 hover:opacity-100">
-                        <ExternalLink size={10} />
-                      </a>
-                    )}
-                  </div>
-                )}
+                {filled && (() => {
+                  const e = r.execution!;
+                  const realized = e.realized_pnl_usd ?? 0;
+                  const isClose = (e.action === "sell" || e.action === "swap") && Math.abs(realized) > 0.004;
+                  const up = realized >= 0;
+                  const pnlColor = up ? "var(--color-mint)" : "var(--color-danger)";
+                  return (
+                    <div className="flex flex-wrap items-center gap-2 mt-2">
+                      <div className="flex items-center gap-1.5 w-fit px-2.5 py-1 rounded-full"
+                        style={{ background: "rgba(78,230,168,0.1)", color: "var(--color-mint)" }}>
+                        <CheckCircle2 size={12} />
+                        <span className="tnum text-[10.5px]">
+                          {isClose ? "closed" : "filled"} {e.action.toUpperCase()} {pl(e.symbol)} · ${e.notional_usd.toFixed(2)} @ {e.fill_price_usd}
+                        </span>
+                        {e.tx_hash && e.venue !== "paper" && (
+                          <a href={`https://bscscan.com/tx/${e.tx_hash}`} target="_blank" rel="noreferrer"
+                            className="inline-flex items-center opacity-70 hover:opacity-100">
+                            <ExternalLink size={10} />
+                          </a>
+                        )}
+                      </div>
+                      {isClose && (
+                        <div className="flex items-center gap-1 w-fit px-2.5 py-1 rounded-full"
+                          style={{ background: up ? "rgba(78,230,168,0.12)" : "rgba(255,93,108,0.12)", color: pnlColor }}>
+                          {up ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                          <span className="tnum text-[10.5px] font-semibold">
+                            {up ? "+" : "−"}${Math.abs(realized).toFixed(2)} {up ? "profit" : "loss"}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </motion.div>
             );
           })}

@@ -14,13 +14,20 @@ for real at execution time by TWAK against the live DEX.
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import httpx
 
 from glassbox.config import Settings
 from glassbox.models import Regime, Signals
 from glassbox.perception.regime import classify_regime
+
+# Last successful market read. Public APIs (CoinGecko especially) throttle hard, so
+# a single 429 must NOT blind the agent — we reuse the last-good signals (slightly
+# stale prices) rather than collapsing to an empty risk-off view that halts trading.
+_LAST_GOOD: Signals | None = None
 
 # CoinGecko ids for the BSC tokens we mark (BSC wrappers track their L1 asset).
 COINGECKO_IDS: dict[str, str] = {
@@ -45,9 +52,10 @@ class LiveMarketData:
         self.s = settings
 
     def fetch(self) -> Signals:
-        """Return Signals built from live public data. Raises on hard failure so
-        the caller can decide how to degrade (it degrades to a safe risk-off view,
-        never to fabricated prices)."""
+        """Return Signals built from live public data. On a transient upstream
+        failure (e.g. CoinGecko 429) reuse the last-good read so the agent keeps
+        trading on slightly-stale data; only raise if we've never had a good read."""
+        global _LAST_GOOD
         # Only request ids for tokens that are actually in our allowlist.
         ids = {
             sym: cg
@@ -57,27 +65,52 @@ class LiveMarketData:
         fear_greed = self._fetch_fear_greed()
         prices, tokens, btc_change = self._fetch_coingecko(ids)
 
+        # a good read needs at least one volatile token priced; otherwise reuse last-good
+        # (in-memory, or persisted from a previous run so a cold start is never blind)
+        if not tokens:
+            cached = _LAST_GOOD or self._load_cached()
+            if cached is not None:
+                stale = cached.model_copy(deep=True)
+                stale.ts = _now_iso()
+                stale.notes = ["live source throttled → reusing last-good market data (stale prices)"]
+                return stale
+            raise RuntimeError("no market data and no last-good cache")
+
         # stablecoins are marked at 1.0 (the base currency must be present)
         for sym in self.s.allowlist:
             if self.s.allowlist[sym].is_stable:
                 prices[sym] = 1.0
 
         regime = classify_regime(fear_greed, btc_change)
-        notes = [f"live market data: CoinGecko + alternative.me (F&G={fear_greed})"]
-        if not prices:
-            notes.append("no prices returned — degraded to risk-off")
-
-        return Signals(
-            regime=regime if prices else Regime.UNKNOWN,
+        sig = Signals(
+            regime=regime,
             fear_greed=fear_greed,
             btc_price=prices.get("BTCB"),
             bnb_price=prices.get("WBNB"),
             tokens=tokens,
             prices_usd=prices,
-            notes=notes,
+            notes=[f"live market data: CoinGecko + alternative.me (F&G={fear_greed})"],
             source="coingecko+fng",
             ts=_now_iso(),
         )
+        _LAST_GOOD = sig
+        self._save_cached(sig)
+        return sig
+
+    def _cache_path(self) -> Path:
+        return Path(self.s.data_dir) / "last_market.json"
+
+    def _load_cached(self) -> Signals | None:
+        try:
+            return Signals.model_validate_json(self._cache_path().read_text())
+        except Exception:
+            return None
+
+    def _save_cached(self, sig: Signals) -> None:
+        try:
+            self._cache_path().write_text(sig.model_dump_json())
+        except Exception:
+            pass
 
     # ── sources ─────────────────────────────────────────────────────────────
     def _fetch_coingecko(
@@ -91,10 +124,19 @@ class LiveMarketData:
             "include_24hr_change": "true",
             "include_24hr_vol": "true",
         }
+        # retry a couple of times — CoinGecko 429s are common and usually transient
+        data: dict = {}
         with httpx.Client(timeout=15) as client:
-            resp = client.get(COINGECKO_URL, params=params)
-            resp.raise_for_status()
-            data = resp.json()
+            for attempt in range(3):
+                try:
+                    resp = client.get(COINGECKO_URL, params=params)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    break
+                except Exception:
+                    if attempt == 2:
+                        return {}, {}, None
+                    time.sleep(1.5 * (attempt + 1))
 
         prices: dict[str, float] = {}
         tokens: dict[str, dict] = {}

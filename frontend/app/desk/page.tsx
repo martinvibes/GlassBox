@@ -124,10 +124,13 @@ function Ribbon({
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay, ease: "easeOut" }}
-      className="glass px-5 py-3.5"
+      className="glass px-5 py-4"
     >
       <div className="label">{label}</div>
-      <div className={`tnum ${big ? "text-[24px]" : "text-[20px]"} mt-1 leading-none`} style={accent ? { color: accent } : undefined}>
+      <div
+        className={`tnum font-semibold tracking-tight ${big ? "text-[32px]" : "text-[27px]"} mt-1.5 leading-none`}
+        style={{ ...(accent ? { color: accent } : {}), ...(accent ? { textShadow: `0 0 22px ${accent}33` } : {}) }}
+      >
         {value}
       </div>
       {sub && <div className="text-[10.5px] text-[var(--color-faint)] mt-1.5 tnum">{sub}</div>}

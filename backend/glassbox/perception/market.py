@@ -39,7 +39,7 @@ COINGECKO_IDS: dict[str, str] = {
 }
 STABLES = {"USDT", "USDC"}
 
-COINGECKO_URL = "https://api.coingecko.com/api/v3/simple/price"
+COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
 FNG_URL = "https://api.alternative.me/fng/?limit=1"
 
 
@@ -118,44 +118,52 @@ class LiveMarketData:
     ) -> tuple[dict[str, float], dict[str, dict], float | None]:
         if not ids:
             return {}, {}, None
+        # /coins/markets gives MULTI-TIMEFRAME momentum (1h/24h/7d) in one call, so the
+        # agent can tell a trend (1h+24h+7d aligned) from an oversold reclaim (24h red,
+        # 1h turning green) — the difference between momentum and mean-reversion entries.
         params = {
+            "vs_currency": "usd",
             "ids": ",".join(sorted(set(ids.values()))),
-            "vs_currencies": "usd",
-            "include_24hr_change": "true",
-            "include_24hr_vol": "true",
+            "price_change_percentage": "1h,24h,7d",
+            "per_page": "100",
+            "page": "1",
         }
-        # retry a couple of times — CoinGecko 429s are common and usually transient
-        data: dict = {}
+        rows: list = []
         with httpx.Client(timeout=15) as client:
             for attempt in range(3):
                 try:
                     resp = client.get(COINGECKO_URL, params=params)
                     resp.raise_for_status()
-                    data = resp.json()
+                    rows = resp.json()
                     break
                 except Exception:
                     if attempt == 2:
                         return {}, {}, None
                     time.sleep(1.5 * (attempt + 1))
 
+        by_id = {r.get("id"): r for r in rows if isinstance(r, dict)}
         prices: dict[str, float] = {}
         tokens: dict[str, dict] = {}
         btc_change: float | None = None
         for sym, cg in ids.items():
-            row = data.get(cg)
-            if not row or "usd" not in row:
+            row = by_id.get(cg)
+            if not row or row.get("current_price") is None:
                 continue
-            price = float(row["usd"])
-            change_pct = float(row.get("usd_24h_change", 0.0))
-            vol = float(row.get("usd_24h_vol", 0.0))
+            price = float(row["current_price"])
+            m1 = float(row.get("price_change_percentage_1h_in_currency") or 0.0)
+            m24 = float(row.get("price_change_percentage_24h_in_currency") or 0.0)
+            m7 = float(row.get("price_change_percentage_7d_in_currency") or 0.0)
             prices[sym] = price
             tokens[sym] = {
-                "momentum_24h": change_pct / 100.0,   # real 24h % change → fraction
-                "liquidity_usd": vol,                  # real 24h volume as liquidity proxy
+                "momentum_1h": m1 / 100.0,             # real 1h % change → fraction
+                "momentum_24h": m24 / 100.0,           # real 24h % change → fraction
+                "momentum_7d": m7 / 100.0,             # real 7d % change → fraction
+                "liquidity_usd": float(row.get("total_volume") or 0.0),
+                "market_cap_usd": float(row.get("market_cap") or 0.0),
                 "price_usd": price,
             }
             if cg == "bitcoin":
-                btc_change = change_pct
+                btc_change = m24
         return prices, tokens, btc_change
 
     def _fetch_fear_greed(self) -> int | None:

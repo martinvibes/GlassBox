@@ -21,13 +21,19 @@ from glassbox.models import Action, Portfolio, Regime, Signals, TradeProposal
 from glassbox.reasoning.memory import BrainMemory
 
 SYSTEM_PROMPT = """You are GlassBox — a disciplined, LEARNING autonomous trading brain on
-BNB Chain. You trade spot momentum: rotate into the single strongest token, take small
+BNB Chain. You trade SPOT only (long or cash — no shorting, no leverage). You make money
+two ways and pick the right one for the tape:
+- MOMENTUM: when 1h/24h/7d momentum align UP, ride the strongest name.
+- DIP-BUY (mean reversion): in a pullback inside a 7d UPTREND (24h red but 1h turning
+  green), buy the oversold reclaim. This is where most money is made — pullbacks are
+  constant, and sitting in cash through every dip makes nothing.
+Only buy names in a 7d uptrend (never catch a falling knife in a downtrend). Take small
 profits fast, cut losers fast, and NEVER approach the max-drawdown cap. Survival comes
-from tight risk, not from sitting idle — an agent that makes nothing loses to anyone with
-positive PnL. Be active but disciplined.
+from tight risk, not idleness — an agent that makes nothing loses to anyone with positive PnL.
 
 Every cycle you are given:
-- live SIGNALS (per-token 24h momentum, regime, fear/greed, prices),
+- live SIGNALS — per-token MULTI-TIMEFRAME momentum (momentum_1h, momentum_24h,
+  momentum_7d as fractions), regime, fear/greed, prices, liquidity,
 - your PORTFOLIO (cash + open positions),
 - your MEMORY: what has actually worked and failed for you THIS session — per-token win/
   loss and realized P&L, which tokens keep stopping you out — plus your evolving thesis
@@ -229,72 +235,112 @@ class Reasoner:
                 proposed_regime=signals.regime, source="heuristic",
             )
 
-        # 1. rank allowlisted non-stable tokens by real 24h momentum (relative strength)
-        ranked: list[tuple[float, str]] = []
+        # 1. score every allowlisted token across timeframes. We only buy names in a
+        #    7d UPTREND (never a falling knife), entered either on momentum continuation
+        #    (24h green) or an OVERSOLD RECLAIM — a dip inside the uptrend turning back up
+        #    (24h red, 1h green). That captures BOTH trends and chop, where pure 24h
+        #    momentum would just sit in cash through every pullback and make nothing.
+        def _score(b: dict) -> tuple[float, str]:
+            m1 = float(b.get("momentum_1h", 0.0))
+            m24 = float(b.get("momentum_24h", 0.0))
+            m7 = float(b.get("momentum_7d", 0.0))
+            if m7 <= 0.0:
+                return -1.0, "downtrend"                # no uptrend → skip (no knife-catching)
+            if m24 >= 0.0:
+                return m7 * 0.4 + m24, "momentum"        # trend continuation
+            if m1 > 0.0:
+                return m7 * 0.4 + m1 * 2.0, "dip"        # oversold reclaim — buy the dip
+            return m7 * 0.15 - 0.01, "falling"           # still dropping in uptrend → wait
+
+        scored: list[tuple[float, str, str]] = []
         for sym, blob in (signals.tokens or {}).items():
             if sym not in self.s.allowlist or _is_stable(sym):
                 continue
             slip = blob.get("est_slippage_bps")
             if slip is not None and float(slip) > self.s.rulebook["limits"]["max_slippage_bps"]:
                 continue
-            ranked.append((float(blob.get("momentum_24h", 0.0)), sym))
-        if not ranked:
+            sc, kind = _score(blob)
+            scored.append((sc, sym, kind))
+        if not scored:
             return TradeProposal(
                 action=Action.HOLD, conviction=0.6,
                 rationale="no live token signals yet → hold cash for a cycle.",
                 proposed_regime=signals.regime, source="heuristic",
             )
-        ranked.sort(reverse=True)
-        # LEARN: steer around tokens that have hard-stopped us repeatedly this session.
-        avoid = self.memory.avoid_set(perf)
-        healthy = [(m, s) for m, s in ranked if s not in avoid] or ranked
-        best_mom, best_sym = healthy[0]
+        scored.sort(key=lambda t: t[0], reverse=True)
 
-        # evolve the thesis (memory the next cycle — and the dashboard — reads back).
-        # When Claude is the active brain it OWNS the thesis (richer); the heuristic only
-        # writes memory when it's the primary reasoner (no key), so it never clobbers
-        # Claude's thesis on the cheap hold cycles.
+        # LEARN: steer around tokens that keep stopping us out this session.
+        avoid = self.memory.avoid_set(perf)
+        healthy = [t for t in scored if t[1] not in avoid] or scored
+        best_score, best_sym, best_kind = healthy[0]
+        bb = signals.tokens.get(best_sym, {})
+        m24 = float(bb.get("momentum_24h", 0.0)) * 100
+        m7 = float(bb.get("momentum_7d", 0.0)) * 100
+
+        # heuristic owns the thesis only when it is the primary brain (Claude owns it
+        # otherwise and must not be clobbered on the cheap hold cycles).
         if not self._use_llm:
             rt = perf.get("realized_total", 0.0)
-            thesis = (f"{signals.regime.value} regime; rotating into {best_sym} "
-                      f"({best_mom * 100:+.1f}% 24h). Session {'+' if rt >= 0 else ''}{rt:.2f} USD.")
+            thesis = (f"{signals.regime.value}; best entry {best_sym} "
+                      f"({best_kind}: 24h {m24:+.1f}% / 7d {m7:+.1f}%). "
+                      f"Session {'+' if rt >= 0 else ''}{rt:.2f} USD.")
             if avoid:
-                thesis += f" Steering around {', '.join(sorted(avoid))} (stopped out)."
+                thesis += f" Avoiding {', '.join(sorted(avoid))} (stopped out)."
                 worst = max(avoid, key=lambda s: perf["tokens"][s]["stops"])
                 self.memory.update(lesson=f"{worst} stopped me out "
                                    f"{perf['tokens'][worst]['stops']}x — avoiding it this session.")
             self.memory.update(thesis=thesis)
 
-        # 2. converge to a SINGLE name: sell anything we hold that isn't the current
-        #    leader (one per cycle) so the book is always just the strongest mover
+        # 2. no token in a clean 7d uptrend with a turn → don't enter; hold what we have
+        #    (exits manage it) or rest in cash. Survival: never chase a downtrend.
+        if best_score <= 0.0:
+            if volatile_held:
+                return TradeProposal(
+                    action=Action.HOLD, conviction=0.6,
+                    rationale="no fresh uptrend entry → hold the open position; exits manage it.",
+                    proposed_regime=signals.regime, source="heuristic",
+                )
+            return TradeProposal(
+                action=Action.HOLD, conviction=0.7,
+                rationale="no token in a 7d uptrend with a clean turn → rest in stablecoin.",
+                proposed_regime=signals.regime, source="heuristic",
+            )
+
+        # 3. converge to the single best name: rotate out of anything else (one per cycle)
         laggards = [s for s in volatile_held if s != best_sym]
         if laggards:
             weak = max(laggards, key=_val)
             return TradeProposal(
                 action=Action.SELL, symbol=weak, size_pct=100.0, conviction=0.85,
-                rationale=(f"rotate: {weak} is no longer the momentum leader → sell to cash, "
-                           f"concentrate into {best_sym} ({best_mom * 100:+.1f}% 24h)."),
+                rationale=(f"rotate: {weak} is no longer the best risk/reward → sell to cash, "
+                           f"concentrate into {best_sym}."),
                 proposed_regime=signals.regime, source="heuristic",
             )
 
-        # 3. already holding (only) the leader → let it ride; exits manage TP/SL
+        # 4. already holding the best name → let it ride; exits manage TP/SL
         if best_sym in volatile_held:
             return TradeProposal(
                 action=Action.HOLD, conviction=0.7,
-                rationale=(f"holding the momentum leader {best_sym} ({best_mom * 100:+.1f}% 24h) "
-                           f"→ let it work; take-profit / stop-loss will manage the exit."),
+                rationale=(f"holding {best_sym} ({best_kind}; 7d {m7:+.1f}%) → let it work; "
+                           f"take-profit / stop-loss manage the exit."),
                 proposed_regime=signals.regime, source="heuristic",
             )
 
-        # 4. flat → deploy a disciplined probe into the leader (conviction from
-        #    relative strength; the gate clamps size to the regime posture)
-        conviction = round(max(0.5, min(0.95, 0.66 + best_mom * 7.0)), 2)
+        # 5. flat → deploy into the best name (momentum continuation OR dip-buy)
+        conviction = round(max(0.5, min(0.93, 0.6 + best_score * 3.0)), 2)
         size = min(self.s.rulebook["sizing"]["max_trade_pct"], 12.0)
         ex = self.s.rulebook.get("exits", {})
+        if best_kind == "dip":
+            why = (f"{best_sym} oversold reclaim — a dip inside a 7d uptrend ({m7:+.1f}% 7d) "
+                   f"turning back up; buy the dip")
+        elif best_kind == "momentum":
+            why = f"{best_sym} on aligned momentum (24h {m24:+.1f}%, 7d {m7:+.1f}%); ride it"
+        else:  # falling — pullback inside a strong uptrend, not yet reclaimed
+            why = (f"{best_sym} pulling back inside a strong 7d uptrend ({m7:+.1f}%) — small "
+                   f"early probe with a tight stop, betting the trend resumes")
         return TradeProposal(
             action=Action.BUY, symbol=best_sym, size_pct=size, conviction=conviction,
-            rationale=(f"{best_sym} leads 24h momentum ({best_mom * 100:+.1f}%) under "
-                       f"'{signals.regime.value}' → deploy a disciplined probe; "
-                       f"take-profit +{ex.get('take_profit_pct', 1.5)}%, stop −{ex.get('stop_loss_pct', 3)}%."),
+            rationale=(f"{why} → disciplined probe; take-profit +{ex.get('take_profit_pct', 1.5)}%, "
+                       f"stop −{ex.get('stop_loss_pct', 3)}%."),
             proposed_regime=signals.regime, source="heuristic",
         )

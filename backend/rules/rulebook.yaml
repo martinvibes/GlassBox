@@ -21,15 +21,22 @@ sizing:
   max_gross_exposure_pct: 60.0 # max % of equity deployed across all positions at once
   max_trade_pct: 15.0          # max % of equity moved in a single trade
   min_trade_usd: 1.0           # floor: trade as little as $1 (parity with retail desks)
+  max_concurrent_positions: 6  # portfolio: hold up to N names at once (diversify, don't over-scalp)
+  target_position_pct: 9.0     # size each new entry to ~this, so the book diversifies
 
 exits:
-  # Lock in small wins fast, cut losers fast. A green trade is a CLOSED trade —
-  # over a few-trade window, banking many small gains beats swinging for a moonshot
-  # (and every position closed to stablecoin is risk we can't give back). The
-  # reasoner enforces these deterministically on every open position, every cycle.
-  take_profit_pct: 1.5         # +1.5% on a position → take profit, return to cash
-  stop_loss_pct: 3.0           # −3.0% on a position → cut it, well inside the DD ceiling
+  # A TRAILING stop is the real edge: once a position is modestly green we ratchet a
+  # stop up behind its peak, so winners lock in profit and a trade "almost never closes
+  # red". Losers that never arm the trail get cut at the hard stop. Deterministic,
+  # enforced on every open position, every cycle (the LLM never overrides an exit).
+  trail_arm_pct: 0.8           # once +0.8% in profit → arm the trailing stop
+  trail_distance_pct: 0.5      # then exit if price falls 0.5% below its peak (banks the gain)
+  take_profit_pct: 2.5         # hard backstop — a fast spike is taken (trail usually fires first)
+  stop_loss_pct: 3.0           # −3.0% on an un-armed position → cut it, well inside the DD ceiling
   min_hold_minutes: 0          # no minimum hold; exits may fire the next cycle
+
+conviction_entry:
+  min_entry_score: 0.012       # quality bar — only deploy on a real setup; below this, wait in cash
 
 limits:
   max_trades_per_day: 30       # headroom for active rotation (cooldown + caps still bound it)
@@ -51,7 +58,7 @@ activity:
 # stands the agent down; every other regime deploys, sized by conviction + these caps.
 regimes:
   risk_off:    { max_gross_exposure_pct: 0.0,  note: "capitulation → stay in stablecoin" }
-  neutral:     { max_gross_exposure_pct: 35.0, note: "trade small, disciplined probes" }
+  neutral:     { max_gross_exposure_pct: 45.0, note: "diversified small probes across names" }
   risk_on:     { max_gross_exposure_pct: 60.0, note: "deploy on conviction" }
   euphoria:    { max_gross_exposure_pct: 45.0, note: "ride strength, fade froth carefully" }
 

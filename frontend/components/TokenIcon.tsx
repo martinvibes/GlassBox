@@ -14,6 +14,8 @@ const TINT: Record<string, string> = {
   CAKE: "#d1884f",
   SOL: "#14f195",
   USDT: "#26a17b", USDC: "#2775ca",
+  XRP: "#23a2db", ADA: "#3468d1", DOGE: "#c2a633", DOT: "#e6007a", LINK: "#2a5ada",
+  LTC: "#5b8fd6", MATIC: "#8247e5", AVAX: "#e84142", UNI: "#ff5fa0", ATOM: "#6f7390",
 };
 
 export default function TokenIcon({ symbol, size = 20 }: { symbol: string; size?: number }) {

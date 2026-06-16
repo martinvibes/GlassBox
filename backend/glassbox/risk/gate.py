@@ -255,11 +255,14 @@ def _evaluate(
             f"BLOCK: daily trade cap reached ({state.trades_today}/{limits['max_trades_per_day']})"
         )
         return base
-    if not directed and state.last_trade_ts is not None:
+    # Cooldown throttles re-trading the SAME name (anti-churn). It does NOT block
+    # diversifying into a NEW name — building a portfolio across markets is the goal,
+    # and total exposure is already bounded by the gross/regime cap below.
+    if not directed and holding and state.last_trade_ts is not None:
         gap_min = (now - state.last_trade_ts).total_seconds() / 60.0
         if gap_min < limits["trade_cooldown_minutes"]:
             base.reasons.append(
-                f"BLOCK: cooldown {gap_min:.0f}m < {limits['trade_cooldown_minutes']}m"
+                f"BLOCK: cooldown {gap_min:.0f}m < {limits['trade_cooldown_minutes']}m (same name)"
             )
             return base
 

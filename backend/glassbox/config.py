@@ -31,6 +31,7 @@ class TokenInfo:
     address: str
     decimals: int
     is_stable: bool
+    coingecko_id: str = ""     # price/momentum feed id (perception derives the universe from this)
 
 
 @dataclass
@@ -81,6 +82,7 @@ def _load_allowlist(path: Path | None = None) -> dict[str, TokenInfo]:
             address=t["address"],
             decimals=int(t["decimals"]),
             is_stable=bool(t.get("is_stable", False)),
+            coingecko_id=str(t.get("coingecko_id", "")),
         )
     return out
 

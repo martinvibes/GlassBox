@@ -58,6 +58,7 @@ class Position(BaseModel):
     symbol: str
     qty: float
     avg_price_usd: float
+    peak_price_usd: float = 0.0     # highest mark seen since entry (drives the trailing stop)
 
     def value_usd(self, mark: float) -> float:
         return self.qty * mark

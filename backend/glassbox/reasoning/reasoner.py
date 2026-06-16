@@ -31,13 +31,18 @@ Only buy names in a 7d uptrend (never catch a falling knife in a downtrend). Tak
 profits fast, cut losers fast, and NEVER approach the max-drawdown cap. Survival comes
 from tight risk, not idleness — an agent that makes nothing loses to anyone with positive PnL.
 
-Every cycle you are given:
-- live SIGNALS — per-token MULTI-TIMEFRAME momentum (momentum_1h, momentum_24h,
-  momentum_7d as fractions), regime, fear/greed, prices, liquidity,
-- your PORTFOLIO (cash + open positions),
-- your MEMORY: what has actually worked and failed for you THIS session — per-token win/
-  loss and realized P&L, which tokens keep stopping you out — plus your evolving thesis
-  and lessons.
+You run a PORTFOLIO: hold up to several different names at once (the gate caps total
+exposure and per-name size). Each cycle, make ONE move — ADD the best fresh setup you don't
+already hold while you have room, PRUNE a held name that has left its 7d uptrend, or HOLD
+and let winners run. Diversify into the best setups across markets; don't pile into one name.
+
+Every cycle you are given (compact):
+- market — regime, fear/greed, BTC 24h.
+- portfolio — cash, equity, and your held names with live gain%.
+- fresh_candidates — pre-scored uptrend names you DON'T hold, each with 1h/24h/7d
+  momentum and a "kind" (momentum or dip-reclaim), ranked best-first. Pick from these.
+- memory — what has worked and failed for you THIS session (per-token win/loss and
+  realized P&L, which names keep stopping you out) plus your evolving thesis and lessons.
 
 Reason WITH your memory. If a token has stopped you out repeatedly, steer away from it. If
 a token is carrying your book, trust it more. That feedback loop is your edge over
@@ -86,62 +91,107 @@ class Reasoner:
                 return p
         return self._heuristic_propose(signals, portfolio, perf)
 
+    @staticmethod
+    def _score_token(b: dict) -> tuple[float, str]:
+        """Multi-timeframe entry score. We are PATIENT and SELECTIVE — only two setups
+        ever score positive, both requiring a 7d uptrend AND short-term confirmation:
+          * momentum: 1h AND 24h both green (trend continuation), or
+          * reclaim:  24h red but 1h GREEN (an oversold dip actually turning back up).
+        A still-falling name (1h red) scores negative — we WAIT for the reclaim instead
+        of catching the knife at market. Shared by the heuristic and the LLM gate."""
+        m1 = float(b.get("momentum_1h", 0.0))
+        m24 = float(b.get("momentum_24h", 0.0))
+        m7 = float(b.get("momentum_7d", 0.0))
+        if m7 <= 0.0:
+            return -1.0, "downtrend"            # no weekly uptrend → never
+        if m24 >= 0.0:
+            # momentum continuation — 24h green is the confirmation (1h is just a bonus)
+            return m7 * 0.4 + m24 + max(0.0, m1), "momentum"
+        # dip (24h red): only buy if the 1h is RECLAIMING (turning back up). Still
+        # falling → wait, don't catch the knife at market.
+        if m1 > 0.0:
+            return m7 * 0.4 + m1 * 2.0, "dip"
+        return -1.0, "falling"
+
     def _is_decision_point(self, signals: Signals, portfolio: Portfolio) -> bool:
-        """Cheap pre-check: is there a non-trivial decision to make? True when flat
-        (consider an entry) or holding a name that's no longer the momentum leader
-        (consider a rotation). Otherwise we're just letting a winner run → no LLM."""
+        """Cheap pre-check: is there a non-trivial portfolio decision? True when a held
+        name has left its 7d uptrend (prune), or there's a free slot AND a fresh uptrend
+        candidate we don't already hold (add). Otherwise we're just letting winners run."""
         def is_stable(s: str) -> bool:
             tok = self.s.allowlist.get(s)
             return bool(tok and tok.is_stable)
         volatile_held = [s for s in portfolio.positions if not is_stable(s)]
-        if not volatile_held:
+        scores = {s: self._score_token(b)[0] for s, b in (signals.tokens or {}).items()
+                  if s in self.s.allowlist and not is_stable(s)}
+        # a held name broke its uptrend → decide (prune)
+        if any(scores.get(s, -1.0) <= 0.0 for s in volatile_held):
             return True
-        ranked = sorted(
-            ((float(b.get("momentum_24h", 0.0)), s) for s, b in (signals.tokens or {}).items()
-             if s in self.s.allowlist and not is_stable(s)),
-            reverse=True,
-        )
-        leader = ranked[0][1] if ranked else None
-        return leader not in volatile_held
+        # free slot + a fresh candidate clearing the quality bar → decide (add)
+        max_slots = int(self.s.rulebook["sizing"].get("max_concurrent_positions", 6))
+        bar = self._min_entry_score()
+        fresh = any(sc >= bar and s not in volatile_held for s, sc in scores.items())
+        return len(volatile_held) < max_slots and fresh
 
-    # ── deterministic exits: take small profits, cut losers ─────────────────
+    def _min_entry_score(self) -> float:
+        return float(self.s.rulebook.get("conviction_entry", {}).get("min_entry_score", 0.0) or 0.0)
+
+    # ── deterministic exits: trailing stop, hard stop, take-profit backstop ──
     def _check_exits(self, signals: Signals, portfolio: Portfolio) -> TradeProposal | None:
-        """Scan open positions; close any that hit the take-profit or stop-loss
-        threshold. Stop-losses are prioritized over take-profits (survival first).
-        Returns a SELL proposal for the most urgent position, or None."""
+        """Update each position's peak, then close the most urgent one:
+          1. TRAILING stop — once armed (+arm%), exit if price falls trail% below its
+             peak. This banks gains and makes a trade 'almost never close red'.
+          2. HARD stop — an un-armed position at −stop% is cut (survival).
+          3. TAKE-PROFIT backstop — a fast spike past +tp% is taken outright.
+        Mutates pos.peak_price_usd (persisted with the portfolio)."""
         ex = self.s.rulebook.get("exits", {})
         tp = float(ex.get("take_profit_pct", 0) or 0)
         sl = float(ex.get("stop_loss_pct", 0) or 0)
-        if not portfolio.positions or (tp <= 0 and sl <= 0):
+        arm = float(ex.get("trail_arm_pct", 0) or 0)
+        trail = float(ex.get("trail_distance_pct", 0) or 0)
+        if not portfolio.positions:
             return None
 
+        trails: list[tuple[float, str, float]] = []  # (gain_now, sym, peak_gain)
         losers: list[tuple[float, str]] = []
-        winners: list[tuple[float, str]] = []
+        takes: list[tuple[float, str]] = []
         for sym, pos in portfolio.positions.items():
             tok = self.s.allowlist.get(sym)
             if (tok and tok.is_stable) or pos.avg_price_usd <= 0:
-                continue  # never "take profit" on a stablecoin
+                continue  # stablecoins are cash, not trades
             mark = signals.prices_usd.get(sym, pos.avg_price_usd)
-            pnl_pct = (mark - pos.avg_price_usd) / pos.avg_price_usd * 100.0
-            if sl > 0 and pnl_pct <= -sl:
-                losers.append((pnl_pct, sym))
-            elif tp > 0 and pnl_pct >= tp:
-                winners.append((pnl_pct, sym))
+            # update the running peak (init to entry on first sight)
+            pos.peak_price_usd = max(pos.peak_price_usd or pos.avg_price_usd, mark)
+            gain = (mark - pos.avg_price_usd) / pos.avg_price_usd * 100.0
+            peak_gain = (pos.peak_price_usd - pos.avg_price_usd) / pos.avg_price_usd * 100.0
+            armed = arm > 0 and peak_gain >= arm
+            if armed and gain <= peak_gain - trail:
+                trails.append((gain, sym, peak_gain))
+            elif sl > 0 and gain <= -sl:
+                losers.append((gain, sym))
+            elif tp > 0 and gain >= tp:
+                takes.append((gain, sym))
 
-        if losers:  # cut the worst loser first
-            pnl_pct, sym = min(losers)
+        if trails:  # bank the armed winner that pulled back from its peak
+            gain, sym, peak_gain = max(trails, key=lambda t: t[2])
             return TradeProposal(
                 action=Action.SELL, symbol=sym, size_pct=100.0, conviction=0.95,
-                rationale=(f"stop-loss: {sym} at {pnl_pct:+.2f}% ≤ −{sl:.1f}% threshold "
-                           f"→ cut the loser back to stablecoin, well inside the DD ceiling."),
+                rationale=(f"trailing stop: {sym} peaked +{peak_gain:.2f}%, pulled back to "
+                           f"{gain:+.2f}% → lock the gain (a green trade is a closed trade)."),
+                proposed_regime=signals.regime, source="exit:trailing",
+            )
+        if losers:  # cut the worst un-armed loser first
+            gain, sym = min(losers)
+            return TradeProposal(
+                action=Action.SELL, symbol=sym, size_pct=100.0, conviction=0.95,
+                rationale=(f"stop-loss: {sym} at {gain:+.2f}% ≤ −{sl:.1f}% → cut the loser, "
+                           f"well inside the drawdown ceiling."),
                 proposed_regime=signals.regime, source="exit:stop_loss",
             )
-        if winners:  # else bank the biggest winner
-            pnl_pct, sym = max(winners)
+        if takes:  # fast spike past the hard backstop
+            gain, sym = max(takes)
             return TradeProposal(
                 action=Action.SELL, symbol=sym, size_pct=100.0, conviction=0.95,
-                rationale=(f"take-profit: {sym} at {pnl_pct:+.2f}% ≥ +{tp:.1f}% threshold "
-                           f"→ bank the gain. A green trade is a closed trade."),
+                rationale=f"take-profit: {sym} spiked to {gain:+.2f}% ≥ +{tp:.1f}% → bank it.",
                 proposed_regime=signals.regime, source="exit:take_profit",
             )
         return None
@@ -151,20 +201,52 @@ class Reasoner:
         from anthropic import Anthropic  # imported lazily; optional dependency
 
         client = Anthropic(api_key=self.s.anthropic_api_key)
+        # PORTFOLIO BRIEF — make diversification explicit: what we hold, how many free
+        # slots, and the fresh uptrend names we DON'T yet hold (rank-ordered). The model
+        # should fill empty slots with NEW names, not pile into one.
+        held = [s for s, t in self.s.allowlist.items()
+                if s in portfolio.positions and not t.is_stable]
+        max_slots = int(self.s.rulebook["sizing"].get("max_concurrent_positions", 6))
+        bar = self._min_entry_score()
+        fresh: list[dict] = []
+        for sym, blob in (signals.tokens or {}).items():
+            if sym not in self.s.allowlist or self.s.allowlist[sym].is_stable or sym in held:
+                continue
+            sc, kind = self._score_token(blob)
+            if sc >= bar:
+                fresh.append({"symbol": sym, "kind": kind, "score": round(sc, 4),
+                              "m1h": blob.get("momentum_1h"), "m24h": blob.get("momentum_24h"),
+                              "m7d": blob.get("momentum_7d")})
+        fresh.sort(key=lambda d: d["score"], reverse=True)
+        slots_remaining = max(0, max_slots - len(held))
+        # COMPACT payload — token-economical. The model only needs market context, what we
+        # hold, and the pre-scored fresh candidates (exits are handled deterministically
+        # before this call, so we don't ship full price tables or token blobs).
+        held_brief = []
+        for sym in held:
+            pos = portfolio.positions[sym]
+            mark = signals.prices_usd.get(sym, pos.avg_price_usd)
+            gain = (mark - pos.avg_price_usd) / pos.avg_price_usd * 100.0 if pos.avg_price_usd else 0.0
+            held_brief.append({"symbol": sym, "value_usd": round(pos.qty * mark, 2), "gain_pct": round(gain, 2)})
         user_payload = {
-            "signals": signals.model_dump(mode="json"),
-            "portfolio": portfolio.model_dump(mode="json"),
+            "market": {"regime": signals.regime.value, "fear_greed": signals.fear_greed,
+                       "btc_24h_pct": round(float((signals.tokens.get("BTCB") or {}).get("momentum_24h", 0.0)) * 100, 2)},
+            "portfolio": {"cash_usd": round(portfolio.cash_usd, 2),
+                          "equity_usd": round(portfolio.equity_usd(signals.prices_usd), 2),
+                          "held": held_brief, "free_slots": slots_remaining},
             "memory": self.memory.prompt_block(perf),
-            "rulebook_hint": {
-                "max_trade_pct": self.s.rulebook["sizing"]["max_trade_pct"],
-                "min_conviction_to_enter": self.s.rulebook["conviction"]["min_score_to_enter"],
-                "take_profit_pct": self.s.rulebook.get("exits", {}).get("take_profit_pct"),
-                "stop_loss_pct": self.s.rulebook.get("exits", {}).get("stop_loss_pct"),
-            },
+            "fresh_candidates": fresh[:7],
+            "guidance": (
+                f"You hold {held or 'nothing'} with {slots_remaining} free slots. DIVERSIFY: "
+                "with a free slot, ADD the top fresh candidate you don't already hold. Only add "
+                "to an existing name if no fresh candidate is compelling."
+            ),
+            "limits": {"target_position_pct": self.s.rulebook["sizing"].get("target_position_pct"),
+                       "max_trade_pct": self.s.rulebook["sizing"]["max_trade_pct"]},
         }
         msg = client.messages.create(
             model=self.s.llm_model,
-            max_tokens=700,
+            max_tokens=500,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": json.dumps(user_payload)}],
         )
@@ -240,18 +322,6 @@ class Reasoner:
         #    (24h green) or an OVERSOLD RECLAIM — a dip inside the uptrend turning back up
         #    (24h red, 1h green). That captures BOTH trends and chop, where pure 24h
         #    momentum would just sit in cash through every pullback and make nothing.
-        def _score(b: dict) -> tuple[float, str]:
-            m1 = float(b.get("momentum_1h", 0.0))
-            m24 = float(b.get("momentum_24h", 0.0))
-            m7 = float(b.get("momentum_7d", 0.0))
-            if m7 <= 0.0:
-                return -1.0, "downtrend"                # no uptrend → skip (no knife-catching)
-            if m24 >= 0.0:
-                return m7 * 0.4 + m24, "momentum"        # trend continuation
-            if m1 > 0.0:
-                return m7 * 0.4 + m1 * 2.0, "dip"        # oversold reclaim — buy the dip
-            return m7 * 0.15 - 0.01, "falling"           # still dropping in uptrend → wait
-
         scored: list[tuple[float, str, str]] = []
         for sym, blob in (signals.tokens or {}).items():
             if sym not in self.s.allowlist or _is_stable(sym):
@@ -259,7 +329,7 @@ class Reasoner:
             slip = blob.get("est_slippage_bps")
             if slip is not None and float(slip) > self.s.rulebook["limits"]["max_slippage_bps"]:
                 continue
-            sc, kind = _score(blob)
+            sc, kind = self._score_token(blob)
             scored.append((sc, sym, kind))
         if not scored:
             return TradeProposal(
@@ -291,56 +361,60 @@ class Reasoner:
                                    f"{perf['tokens'][worst]['stops']}x — avoiding it this session.")
             self.memory.update(thesis=thesis)
 
-        # 2. no token in a clean 7d uptrend with a turn → don't enter; hold what we have
-        #    (exits manage it) or rest in cash. Survival: never chase a downtrend.
-        if best_score <= 0.0:
-            if volatile_held:
-                return TradeProposal(
-                    action=Action.HOLD, conviction=0.6,
-                    rationale="no fresh uptrend entry → hold the open position; exits manage it.",
-                    proposed_regime=signals.regime, source="heuristic",
-                )
-            return TradeProposal(
-                action=Action.HOLD, conviction=0.7,
-                rationale="no token in a 7d uptrend with a clean turn → rest in stablecoin.",
-                proposed_regime=signals.regime, source="heuristic",
-            )
+        # ── PORTFOLIO: hold up to N names at once, each in a 7d uptrend ───────────
+        sizing = self.s.rulebook["sizing"]
+        max_slots = int(sizing.get("max_concurrent_positions", 6))
+        score_of = {s: sc for sc, s, _ in scored}
 
-        # 3. converge to the single best name: rotate out of anything else (one per cycle)
-        laggards = [s for s in volatile_held if s != best_sym]
-        if laggards:
-            weak = max(laggards, key=_val)
+        # 2. PRUNE: sell any held name that LEFT its 7d uptrend (score ≤ 0) — free a slot
+        #    for a better setup. (Take-profit / stop-loss still run first, per position.)
+        broken = [s for s in volatile_held if score_of.get(s, -1.0) <= 0.0]
+        if broken:
+            weak = min(broken, key=lambda s: score_of.get(s, -1.0))
+            b7 = float(signals.tokens.get(weak, {}).get("momentum_7d", 0.0)) * 100
             return TradeProposal(
                 action=Action.SELL, symbol=weak, size_pct=100.0, conviction=0.85,
-                rationale=(f"rotate: {weak} is no longer the best risk/reward → sell to cash, "
-                           f"concentrate into {best_sym}."),
+                rationale=f"{weak} left its 7d uptrend ({b7:+.1f}% 7d) → exit to cash, free the slot.",
                 proposed_regime=signals.regime, source="heuristic",
             )
 
-        # 4. already holding the best name → let it ride; exits manage TP/SL
-        if best_sym in volatile_held:
+        # 3. ADD: if there's a free slot and a fresh candidate that CLEARS THE QUALITY
+        #    BAR (a real reclaim/momentum setup, not a marginal one) we don't already
+        #    hold, deploy into it. In a weak market nothing clears the bar → hold cash.
+        bar = self._min_entry_score()
+        candidates = [(sc, s, k) for sc, s, k in healthy if sc >= bar and s not in volatile_held]
+        if candidates and len(volatile_held) < max_slots:
+            sc, sym, kind = candidates[0]
+            bb2 = signals.tokens.get(sym, {})
+            c24 = float(bb2.get("momentum_24h", 0.0)) * 100
+            c7 = float(bb2.get("momentum_7d", 0.0)) * 100
+            conviction = round(max(0.5, min(0.93, 0.6 + sc * 3.0)), 2)
+            size = min(float(sizing["max_trade_pct"]), float(sizing.get("target_position_pct", 10.0)))
+            ex = self.s.rulebook.get("exits", {})
+            if kind == "dip":
+                why = f"{sym} oversold reclaim inside a 7d uptrend ({c7:+.1f}% 7d) — buy the dip"
+            elif kind == "momentum":
+                why = f"{sym} aligned momentum (24h {c24:+.1f}%, 7d {c7:+.1f}%) — ride it"
+            else:
+                why = f"{sym} pullback inside a strong 7d uptrend ({c7:+.1f}%) — small early probe"
+            held_note = f" (book: {len(volatile_held) + 1}/{max_slots} names)" if volatile_held else ""
+            return TradeProposal(
+                action=Action.BUY, symbol=sym, size_pct=size, conviction=conviction,
+                rationale=(f"{why}{held_note} → take-profit +{ex.get('take_profit_pct', 1.5)}%, "
+                           f"stop −{ex.get('stop_loss_pct', 3)}%."),
+                proposed_regime=signals.regime, source="heuristic",
+            )
+
+        # 4. portfolio full / no new setups → hold; exits (TP/SL) manage each position
+        if volatile_held:
             return TradeProposal(
                 action=Action.HOLD, conviction=0.7,
-                rationale=(f"holding {best_sym} ({best_kind}; 7d {m7:+.1f}%) → let it work; "
-                           f"take-profit / stop-loss manage the exit."),
+                rationale=(f"holding {len(volatile_held)} name(s) in 7d uptrends → let them work; "
+                           f"take-profit / stop-loss manage each exit."),
                 proposed_regime=signals.regime, source="heuristic",
             )
-
-        # 5. flat → deploy into the best name (momentum continuation OR dip-buy)
-        conviction = round(max(0.5, min(0.93, 0.6 + best_score * 3.0)), 2)
-        size = min(self.s.rulebook["sizing"]["max_trade_pct"], 12.0)
-        ex = self.s.rulebook.get("exits", {})
-        if best_kind == "dip":
-            why = (f"{best_sym} oversold reclaim — a dip inside a 7d uptrend ({m7:+.1f}% 7d) "
-                   f"turning back up; buy the dip")
-        elif best_kind == "momentum":
-            why = f"{best_sym} on aligned momentum (24h {m24:+.1f}%, 7d {m7:+.1f}%); ride it"
-        else:  # falling — pullback inside a strong uptrend, not yet reclaimed
-            why = (f"{best_sym} pulling back inside a strong 7d uptrend ({m7:+.1f}%) — small "
-                   f"early probe with a tight stop, betting the trend resumes")
         return TradeProposal(
-            action=Action.BUY, symbol=best_sym, size_pct=size, conviction=conviction,
-            rationale=(f"{why} → disciplined probe; take-profit +{ex.get('take_profit_pct', 1.5)}%, "
-                       f"stop −{ex.get('stop_loss_pct', 3)}%."),
+            action=Action.HOLD, conviction=0.7,
+            rationale="no token in a 7d uptrend with a clean turn → rest in stablecoin.",
             proposed_regime=signals.regime, source="heuristic",
         )

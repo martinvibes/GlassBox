@@ -134,14 +134,31 @@ def test_blocks_when_daily_cap_reached():
     assert any("daily trade cap" in r for r in d.reasons)
 
 
-def test_blocks_within_cooldown():
+def test_cooldown_blocks_re_adding_same_name():
+    # cooldown throttles re-trading the SAME held name (anti-churn)
+    pf = Portfolio(
+        base_currency="USDT", cash_usd=900.0,
+        positions={"WBNB": Position(symbol="WBNB", qty=0.1, avg_price_usd=600.0)},
+        high_water_mark_usd=1000.0,
+    )
     st = RiskState()
     st.roll_day(NOW)
     st.last_trade_ts = NOW
-    d = G.evaluate(_buy(), _flat_portfolio(), _signals(regime=Regime.RISK_ON),
+    d = G.evaluate(_buy(symbol="WBNB", conv=0.8), pf, _signals(regime=Regime.RISK_ON),
                    st, RULEBOOK, NOW)
     assert d.verdict == GateVerdict.BLOCK
     assert any("cooldown" in r for r in d.reasons)
+
+
+def test_cooldown_allows_new_name():
+    # ...but must NOT block diversifying into a NEW name (portfolio building)
+    st = RiskState()
+    st.roll_day(NOW)
+    st.last_trade_ts = NOW
+    d = G.evaluate(_buy(symbol="WBNB"), _flat_portfolio(), _signals(regime=Regime.RISK_ON),
+                   st, RULEBOOK, NOW)
+    assert d.verdict in (GateVerdict.ALLOW, GateVerdict.CLAMP)
+    assert not any("cooldown" in r for r in d.reasons)
 
 
 # ── slippage ───────────────────────────────────────────────────────────────

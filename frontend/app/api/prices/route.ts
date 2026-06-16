@@ -9,9 +9,13 @@ export const revalidate = 0;
 // TradingView feed exactly where it's reachable). Stablecoins are pegged at $1.
 const CG_IDS: Record<string, string> = {
   WBNB: "binancecoin", BTCB: "bitcoin", ETH: "ethereum", SOL: "solana", CAKE: "pancakeswap-token",
+  XRP: "ripple", ADA: "cardano", DOGE: "dogecoin", DOT: "polkadot", LINK: "chainlink",
+  LTC: "litecoin", MATIC: "matic-network", AVAX: "avalanche-2", UNI: "uniswap", ATOM: "cosmos",
 };
 const BINANCE: Record<string, string> = {
   WBNB: "BNBUSDT", BTCB: "BTCUSDT", ETH: "ETHUSDT", SOL: "SOLUSDT", CAKE: "CAKEUSDT",
+  XRP: "XRPUSDT", ADA: "ADAUSDT", DOGE: "DOGEUSDT", DOT: "DOTUSDT", LINK: "LINKUSDT",
+  LTC: "LTCUSDT", MATIC: "MATICUSDT", AVAX: "AVAXUSDT", UNI: "UNIUSDT", ATOM: "ATOMUSDT",
 };
 
 // cross-request cache (survives route-module re-evaluation) so two pollers can't

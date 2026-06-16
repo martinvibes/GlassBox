@@ -29,14 +29,6 @@ from glassbox.perception.regime import classify_regime
 # stale prices) rather than collapsing to an empty risk-off view that halts trading.
 _LAST_GOOD: Signals | None = None
 
-# CoinGecko ids for the BSC tokens we mark (BSC wrappers track their L1 asset).
-COINGECKO_IDS: dict[str, str] = {
-    "WBNB": "binancecoin",
-    "BTCB": "bitcoin",
-    "ETH": "ethereum",
-    "CAKE": "pancakeswap-token",
-    "SOL": "solana",
-}
 STABLES = {"USDT", "USDC"}
 
 COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
@@ -56,11 +48,12 @@ class LiveMarketData:
         failure (e.g. CoinGecko 429) reuse the last-good read so the agent keeps
         trading on slightly-stale data; only raise if we've never had a good read."""
         global _LAST_GOOD
-        # Only request ids for tokens that are actually in our allowlist.
+        # The tradeable universe IS the allowlist: fetch every non-stable token that
+        # carries a CoinGecko id. Add a token to token_allowlist.json and it trades.
         ids = {
-            sym: cg
-            for sym, cg in COINGECKO_IDS.items()
-            if sym in self.s.allowlist
+            sym: tok.coingecko_id
+            for sym, tok in self.s.allowlist.items()
+            if tok.coingecko_id and not tok.is_stable
         }
         fear_greed = self._fetch_fear_greed()
         prices, tokens, btc_change = self._fetch_coingecko(ids)

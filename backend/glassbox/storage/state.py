@@ -50,17 +50,21 @@ def mark_to_market(portfolio: Portfolio, prices_usd: dict[str, float]) -> float:
 def apply_paper_buy(
     portfolio: Portfolio, symbol: str, qty: float, fill_price: float, notional: float
 ) -> None:
-    """Spend `notional` cash, add `qty` of `symbol` at a blended avg price."""
+    """Spend `notional` cash (fees INCLUDED), add `qty` of `symbol`. The cost basis
+    is the full cash outlay (`notional`), so realized P&L on the eventual sell is the
+    true cash profit — buy-side fees are part of the basis, not silently dropped."""
     portfolio.cash_usd -= notional
+    if qty <= 0:
+        return
     if symbol in portfolio.positions:
         pos = portfolio.positions[symbol]
         new_qty = pos.qty + qty
-        if new_qty > 0:
-            pos.avg_price_usd = (pos.qty * pos.avg_price_usd + qty * fill_price) / new_qty
+        # blend by total cash spent: (existing basis + new outlay) / new qty
+        pos.avg_price_usd = (pos.qty * pos.avg_price_usd + notional) / new_qty
         pos.qty = new_qty
     else:
         portfolio.positions[symbol] = Position(
-            symbol=symbol, qty=qty, avg_price_usd=fill_price
+            symbol=symbol, qty=qty, avg_price_usd=notional / qty
         )
 
 
@@ -120,12 +124,14 @@ def apply_paper_swap(
 
     if to_sym == base_currency:
         portfolio.cash_usd += net
-    else:
+    elif to_qty > 0:
+        # cost basis of the acquired token = the FULL `usd` value given up (fee
+        # included), so a later sell books the true cash P&L.
         existing = portfolio.positions.get(to_sym)
         if existing:
             new_qty = existing.qty + to_qty
-            existing.avg_price_usd = (existing.qty * existing.avg_price_usd + net) / new_qty
+            existing.avg_price_usd = (existing.qty * existing.avg_price_usd + usd) / new_qty
             existing.qty = new_qty
         else:
-            portfolio.positions[to_sym] = Position(symbol=to_sym, qty=to_qty, avg_price_usd=eff_to_price)
+            portfolio.positions[to_sym] = Position(symbol=to_sym, qty=to_qty, avg_price_usd=usd / to_qty)
     return to_qty, eff_to_price, realized

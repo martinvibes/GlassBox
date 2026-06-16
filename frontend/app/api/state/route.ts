@@ -9,6 +9,7 @@ import {
   readMandate,
   readPendingCommand,
   readRuntime,
+  readBrainMemory,
 } from "@/lib/backend";
 import type { Regime, StatePayload } from "@/lib/types";
 
@@ -16,7 +17,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET() {
-  const [decisions, portfolio, agentId, env, caps, control, mandate, runtime] = await Promise.all([
+  const [decisions, portfolio, agentId, env, caps, control, mandate, runtime, brainMem] = await Promise.all([
     readDecisions(),
     readPortfolio(),
     readAgentId(),
@@ -25,8 +26,29 @@ export async function GET() {
     readControl(),
     readMandate(),
     readRuntime(),
+    readBrainMemory(),
   ]);
   const pendingCommand = await readPendingCommand();
+
+  // Brain scorecard — per-token W/L + realized P&L from CLOSED trades (the closed-loop
+  // memory the agent reasons over). Mirrors backend memory.performance().
+  const brainTokens: Record<string, { wins: number; losses: number; pnl: number; stops: number }> = {};
+  let realizedTotal = 0;
+  let closedTrades = 0;
+  for (const d of decisions) {
+    const e = d.execution;
+    const rp = e?.realized_pnl_usd ?? 0;
+    if (e?.action === "sell" && Math.abs(rp) > 1e-9) {
+      const sym = e.symbol || "?";
+      const t = (brainTokens[sym] ??= { wins: 0, losses: 0, pnl: 0, stops: 0 });
+      t.pnl += rp;
+      if (rp > 0) t.wins++; else t.losses++;
+      if (d.proposal?.source === "exit:stop_loss") t.stops++;
+      realizedTotal += rp;
+      closedTrades++;
+    }
+  }
+  for (const t of Object.values(brainTokens)) t.pnl = Math.round(t.pnl * 100) / 100;
 
   // DCA schedule: when the next scheduled buy is due (last run + interval)
   let dcaNextRun: number | null = null;
@@ -79,6 +101,13 @@ export async function GET() {
     agentMode: control.mode,
     dca: control.dca ?? null,
     dcaNextRun,
+    brain: {
+      thesis: brainMem.thesis,
+      lessons: brainMem.lessons,
+      realizedTotal: Math.round(realizedTotal * 100) / 100,
+      closedTrades,
+      tokens: brainTokens,
+    },
     pendingCommand,
     regime,
     fearGreed: latest?.signals.fear_greed ?? null,

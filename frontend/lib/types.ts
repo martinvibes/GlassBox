@@ -98,6 +98,13 @@ export interface StatePayload {
   agentMode: "autonomous" | "dca" | "manual";
   dca: { token?: string; amount_usd?: number; interval_hours?: number } | null;
   dcaNextRun: number | null;
+  brain: {
+    thesis: string;
+    lessons: string[];
+    realizedTotal: number;
+    closedTrades: number;
+    tokens: Record<string, { wins: number; losses: number; pnl: number; stops: number }>;
+  };
   pendingCommand: { action: string; symbol: string } | null;
   regime: Regime;
   fearGreed: number | null;

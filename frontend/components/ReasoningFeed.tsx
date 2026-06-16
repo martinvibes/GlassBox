@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { CheckCircle2, ExternalLink, TrendingUp, TrendingDown } from "lucide-react";
 import { usePolling } from "@/lib/usePolling";
 import { VerdictChip } from "./ui";
+import BrainPanel from "./BrainPanel";
 import { timeAgo } from "@/lib/format";
 import type { DecisionRecord, Action } from "@/lib/types";
 
@@ -29,6 +30,8 @@ export default function ReasoningFeed() {
         </div>
         <span className="label">{rows.length} records</span>
       </div>
+
+      <BrainPanel />
 
       <div className="flex-1 overflow-y-auto">
         {rows.length === 0 && (

@@ -141,6 +141,17 @@ export async function readPendingCommand(): Promise<{ action: string; symbol: st
   }
 }
 
+export async function readBrainMemory(): Promise<{ thesis: string; lessons: string[] }> {
+  const raw = await readText(path.join(DATA, "brain_memory.json"));
+  if (!raw) return { thesis: "", lessons: [] };
+  try {
+    const j = JSON.parse(raw);
+    return { thesis: String(j.thesis ?? ""), lessons: Array.isArray(j.lessons) ? j.lessons.map(String) : [] };
+  } catch {
+    return { thesis: "", lessons: [] };
+  }
+}
+
 export async function readRuntime(): Promise<{ dca_last_run?: string; command_last_ts?: string }> {
   const raw = await readText(path.join(DATA, "agent_runtime.json"));
   if (!raw) return {};

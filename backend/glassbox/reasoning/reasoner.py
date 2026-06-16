@@ -18,24 +18,36 @@ import json
 
 from glassbox.config import Settings
 from glassbox.models import Action, Portfolio, Regime, Signals, TradeProposal
+from glassbox.reasoning.memory import BrainMemory
 
-SYSTEM_PROMPT = """You are GlassBox, a disciplined autonomous trading agent on BNB Chain.
-Your overriding objective in this competition is CAPITAL PRESERVATION: survive a 7-day
-live PnL window without ever approaching the max-drawdown cap. Most competitors will
-over-leverage and blow up; you win by being the one still standing with positive PnL.
+SYSTEM_PROMPT = """You are GlassBox — a disciplined, LEARNING autonomous trading brain on
+BNB Chain. You trade spot momentum: rotate into the single strongest token, take small
+profits fast, cut losers fast, and NEVER approach the max-drawdown cap. Survival comes
+from tight risk, not from sitting idle — an agent that makes nothing loses to anyone with
+positive PnL. Be active but disciplined.
 
-Rules of engagement:
-- Default to HOLD / staying in stablecoins. Only propose a BUY on genuine, multi-signal
-  conviction (momentum + supportive regime + adequate liquidity).
-- TAKE SMALL PROFITS. Don't swing for a moonshot — the moment a position is modestly
-  green, bank it back to stablecoin. Banking many small wins beats one big bet over a
-  few-trade window, and cash can't draw down. (Hard take-profit/stop-loss thresholds are
-  also enforced deterministically before you even see this, so lean the same way.)
-- In a risk_off regime, never propose new exposure. Propose SELL to de-risk.
-- Size modestly. The risk gate will clamp you anyway; propose what's sensible.
-- Output ONLY a JSON object: {"action","symbol","size_pct","conviction","rationale"}.
-  action ∈ {buy,sell,hold}; size_pct is % of equity (0-15); conviction is 0..1.
-- Your rationale is logged verbatim and shown to judges. Make it crisp and honest.
+Every cycle you are given:
+- live SIGNALS (per-token 24h momentum, regime, fear/greed, prices),
+- your PORTFOLIO (cash + open positions),
+- your MEMORY: what has actually worked and failed for you THIS session — per-token win/
+  loss and realized P&L, which tokens keep stopping you out — plus your evolving thesis
+  and lessons.
+
+Reason WITH your memory. If a token has stopped you out repeatedly, steer away from it. If
+a token is carrying your book, trust it more. That feedback loop is your edge over
+deterministic indicator bots that never learn.
+
+Decide ONE action and output ONLY a JSON object:
+{"action","symbol","size_pct","conviction","rationale","thesis","lesson"}
+- action ∈ {buy,sell,hold}; symbol is a token from the signals (BNB=WBNB, BTC=BTCB, etc.).
+  buy = open/rotate into the leader; sell = close a held position; hold = let a winner run
+  or stay in cash.
+- size_pct: % of equity to deploy (0-15). conviction: 0..1 (the gate enforces a floor).
+- rationale: ONE crisp, honest sentence — logged verbatim and shown to judges.
+- thesis: your updated 1-2 sentence market read (persisted as memory for next cycle).
+- lesson: a one-line lesson if an outcome taught you something this session, else "".
+Hard take-profit / stop-loss exits run BEFORE you, deterministically — lean the same way.
+The risk gate has the final say and clamps your size; you never sign a transaction.
 """
 
 
@@ -43,6 +55,7 @@ class Reasoner:
     def __init__(self, settings: Settings) -> None:
         self.s = settings
         self._use_llm = bool(settings.anthropic_api_key)
+        self.memory = BrainMemory(settings.data_dir)
 
     def propose(self, signals: Signals, portfolio: Portfolio) -> TradeProposal:
         # Exits come FIRST and are deterministic: a position past its take-profit or
@@ -52,15 +65,38 @@ class Reasoner:
         if exit_proposal is not None:
             return exit_proposal
 
-        if self._use_llm:
+        # the closed-loop brain: read this session's performance memory, reason WITH it.
+        perf = self.memory.performance()
+        # Think hard (one Claude call) only at genuine DECISION POINTS — flat, or holding
+        # something that's no longer the leader. Holding the leader is a cheap, instant
+        # HOLD, so the agent stays responsive and doesn't burn the API saying "hold".
+        if self._use_llm and self._is_decision_point(signals, portfolio):
             try:
-                return self._llm_propose(signals, portfolio)
+                return self._llm_propose(signals, portfolio, perf)
             except Exception as exc:
-                p = self._heuristic_propose(signals, portfolio)
+                p = self._heuristic_propose(signals, portfolio, perf)
                 p.rationale = f"[LLM failed: {exc}; used heuristic] " + p.rationale
                 p.source = "heuristic(fallback)"
                 return p
-        return self._heuristic_propose(signals, portfolio)
+        return self._heuristic_propose(signals, portfolio, perf)
+
+    def _is_decision_point(self, signals: Signals, portfolio: Portfolio) -> bool:
+        """Cheap pre-check: is there a non-trivial decision to make? True when flat
+        (consider an entry) or holding a name that's no longer the momentum leader
+        (consider a rotation). Otherwise we're just letting a winner run → no LLM."""
+        def is_stable(s: str) -> bool:
+            tok = self.s.allowlist.get(s)
+            return bool(tok and tok.is_stable)
+        volatile_held = [s for s in portfolio.positions if not is_stable(s)]
+        if not volatile_held:
+            return True
+        ranked = sorted(
+            ((float(b.get("momentum_24h", 0.0)), s) for s, b in (signals.tokens or {}).items()
+             if s in self.s.allowlist and not is_stable(s)),
+            reverse=True,
+        )
+        leader = ranked[0][1] if ranked else None
+        return leader not in volatile_held
 
     # ── deterministic exits: take small profits, cut losers ─────────────────
     def _check_exits(self, signals: Signals, portfolio: Portfolio) -> TradeProposal | None:
@@ -105,35 +141,41 @@ class Reasoner:
         return None
 
     # ── LLM backend ────────────────────────────────────────────────────────
-    def _llm_propose(self, signals: Signals, portfolio: Portfolio) -> TradeProposal:
+    def _llm_propose(self, signals: Signals, portfolio: Portfolio, perf: dict) -> TradeProposal:
         from anthropic import Anthropic  # imported lazily; optional dependency
 
         client = Anthropic(api_key=self.s.anthropic_api_key)
         user_payload = {
             "signals": signals.model_dump(mode="json"),
             "portfolio": portfolio.model_dump(mode="json"),
+            "memory": self.memory.prompt_block(perf),
             "rulebook_hint": {
                 "max_trade_pct": self.s.rulebook["sizing"]["max_trade_pct"],
                 "min_conviction_to_enter": self.s.rulebook["conviction"]["min_score_to_enter"],
+                "take_profit_pct": self.s.rulebook.get("exits", {}).get("take_profit_pct"),
+                "stop_loss_pct": self.s.rulebook.get("exits", {}).get("stop_loss_pct"),
             },
         }
         msg = client.messages.create(
             model=self.s.llm_model,
-            max_tokens=600,
+            max_tokens=700,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": json.dumps(user_payload)}],
         )
         text = "".join(block.text for block in msg.content if block.type == "text")
-        return self._parse(text, signals, source="llm")
+        proposal, thesis, lesson = self._parse(text, signals, source="llm")
+        # CLOSE THE LOOP: the model's evolving read becomes memory for the next cycle.
+        self.memory.update(thesis=thesis, lesson=lesson)
+        return proposal
 
     @staticmethod
-    def _parse(text: str, signals: Signals, source: str) -> TradeProposal:
-        """Fail-safe parse: malformed model output → HOLD (never a wild trade)."""
+    def _parse(text: str, signals: Signals, source: str) -> tuple[TradeProposal, str, str]:
+        """Fail-safe parse → (proposal, thesis, lesson). Malformed output → HOLD."""
         try:
             start, end = text.find("{"), text.rfind("}")
             data = json.loads(text[start : end + 1])
             action = Action(str(data.get("action", "hold")).lower())
-            return TradeProposal(
+            proposal = TradeProposal(
                 action=action,
                 symbol=str(data.get("symbol", "")).upper(),
                 size_pct=float(data.get("size_pct", 0.0)),
@@ -142,21 +184,25 @@ class Reasoner:
                 proposed_regime=signals.regime,
                 source=source,
             )
+            return proposal, str(data.get("thesis", "")), str(data.get("lesson", ""))
         except Exception as exc:
-            return TradeProposal(
+            fallback = TradeProposal(
                 action=Action.HOLD,
                 conviction=0.0,
                 rationale=f"unparseable model output → fail-safe HOLD ({exc})",
                 proposed_regime=signals.regime,
                 source=f"{source}(parsefail)",
             )
+            return fallback, "", ""
 
-    # ── Heuristic backend: active, disciplined momentum rotation ─────────────
-    def _heuristic_propose(self, signals: Signals, portfolio: Portfolio) -> TradeProposal:
+    # ── Heuristic backend: active, disciplined momentum rotation that LEARNS ──
+    def _heuristic_propose(self, signals: Signals, portfolio: Portfolio, perf: dict) -> TradeProposal:
         """Always try to hold the single strongest-momentum token, sized by the
         gate's regime posture, with take-profit / stop-loss exits (checked first,
         in `propose`) and the drawdown breaker doing the risk work. Only true
-        capitulation (risk_off) stands the agent fully down."""
+        capitulation (risk_off) stands the agent fully down. It also LEARNS: tokens
+        that keep stopping it out this session are steered around (closed-loop memory,
+        unlike a static indicator bot)."""
 
         def _is_stable(s: str) -> bool:
             tok = self.s.allowlist.get(s)
@@ -199,7 +245,25 @@ class Reasoner:
                 proposed_regime=signals.regime, source="heuristic",
             )
         ranked.sort(reverse=True)
-        best_mom, best_sym = ranked[0]
+        # LEARN: steer around tokens that have hard-stopped us repeatedly this session.
+        avoid = self.memory.avoid_set(perf)
+        healthy = [(m, s) for m, s in ranked if s not in avoid] or ranked
+        best_mom, best_sym = healthy[0]
+
+        # evolve the thesis (memory the next cycle — and the dashboard — reads back).
+        # When Claude is the active brain it OWNS the thesis (richer); the heuristic only
+        # writes memory when it's the primary reasoner (no key), so it never clobbers
+        # Claude's thesis on the cheap hold cycles.
+        if not self._use_llm:
+            rt = perf.get("realized_total", 0.0)
+            thesis = (f"{signals.regime.value} regime; rotating into {best_sym} "
+                      f"({best_mom * 100:+.1f}% 24h). Session {'+' if rt >= 0 else ''}{rt:.2f} USD.")
+            if avoid:
+                thesis += f" Steering around {', '.join(sorted(avoid))} (stopped out)."
+                worst = max(avoid, key=lambda s: perf["tokens"][s]["stops"])
+                self.memory.update(lesson=f"{worst} stopped me out "
+                                   f"{perf['tokens'][worst]['stops']}x — avoiding it this session.")
+            self.memory.update(thesis=thesis)
 
         # 2. converge to a SINGLE name: sell anything we hold that isn't the current
         #    leader (one per cycle) so the book is always just the strongest mover

@@ -129,6 +129,17 @@ export default function AgentConsole() {
     toast.success(`DCA armed · buy ${label(dcaTok)} $${dcaAmt} every ${dcaInt}h`);
   };
   const sendCommand = async (action: string, symbol?: string, size_pct?: number) => {
+    // spot mechanics: you can only sell/close what you hold. Handle it softly
+    // (a gentle note) instead of bouncing it off the gate as a red "BLOCK".
+    const pos = data?.portfolio?.positions ?? {};
+    if (action === "sell" && symbol && !pos[symbol]) {
+      toast.show("info", `You're not holding ${label(symbol)} — Buy to open a position first.`);
+      return;
+    }
+    if (action === "flatten" && Object.keys(pos).length === 0) {
+      toast.show("info", "No open positions to close.");
+      return;
+    }
     if (mode !== "manual") await switchMode("manual");
     const verb = action === "buy" ? `Buying ${label(symbol ?? "")}` : action === "sell" ? `Selling ${label(symbol ?? "")}` : "Closing all positions";
     await runAction(`${verb}…`, { action, symbol, size_pct });
@@ -287,20 +298,19 @@ export default function AgentConsole() {
                 style={{ background: "var(--color-mint)", color: "#08080b" }}>
                 Buy {label(manTo)}
               </button>
-              <button onClick={() => sendCommand("sell", manTo)} disabled={!heldTo}
-                className="flex items-center justify-center gap-1.5 rounded-xl py-3 text-[14px] font-semibold transition-transform enabled:hover:scale-[1.02] active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+              <button onClick={() => sendCommand("sell", manTo)}
+                className="flex items-center justify-center gap-1.5 rounded-xl py-3 text-[14px] font-semibold transition-transform hover:scale-[1.02] active:scale-95"
                 style={{ background: "rgba(255,93,108,0.14)", color: "var(--color-danger)" }}>
                 Sell {label(manTo)}
               </button>
             </div>
-            {!heldTo && (
-              <p className="text-[11px] text-[var(--color-faint)] leading-snug -mt-1">
-                No open {label(manTo)} position — <span className="text-[var(--color-muted)]">Buy</span> first to open one, then Sell to close.
-              </p>
-            )}
-            <button onClick={() => sendCommand("flatten")} disabled={!anyPos}
-              className="w-full flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[13px] hairline text-[var(--color-muted)] enabled:hover:text-[var(--color-danger)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              title={anyPos ? "Close every open position" : "No open positions to close"}>
+            <p className="text-[11px] text-[var(--color-faint)] leading-snug -mt-1">
+              {heldTo
+                ? <>Holding <span className="text-[var(--color-fg)]">{(positions[manTo]?.qty ?? 0).toLocaleString("en-US", { maximumFractionDigits: 4 })} {label(manTo)}</span> — Sell closes it.</>
+                : <>Buy opens a {label(manTo)} position · Sell closes one you hold.</>}
+            </p>
+            <button onClick={() => sendCommand("flatten")}
+              className="w-full flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[13px] hairline text-[var(--color-muted)] hover:text-[var(--color-danger)] transition-colors">
               <XCircle size={14} /> Close all positions{anyPos ? ` (${Object.keys(positions).length})` : ""}
             </button>
             <p className="label" style={{ letterSpacing: "0.1em" }}>routed through the gate · fills in seconds</p>

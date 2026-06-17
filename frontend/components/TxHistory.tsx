@@ -10,10 +10,12 @@ const PAIR: Record<string, string> = { WBNB: "BNB", BTCB: "BTC", ETH: "ETH", SOL
 const pl = (s: string) => PAIR[s] ?? s;
 
 export default function TxHistory() {
-  const { data } = usePolling<{ decisions: DecisionRecord[] }>("/api/decisions?limit=80", 6000);
-  const fills = (data?.decisions ?? [])
-    .filter((r) => r.execution?.ok && r.execution.notional_usd > 0 && r.execution.action !== "hold")
-    .reverse(); // newest first
+  // fills=true → the FULL trade history (server scans the whole audit log), so trades
+  // never disappear behind the agent's HOLD cycles. Already executed-only + newest-first.
+  const { data } = usePolling<{ decisions: DecisionRecord[] }>("/api/decisions?fills=true", 6000);
+  const fills = (data?.decisions ?? []).filter(
+    (r) => r.execution?.ok && r.execution.notional_usd > 0 && r.execution.action !== "hold"
+  );
 
   return (
     <div className="glass flex flex-col h-full overflow-hidden">

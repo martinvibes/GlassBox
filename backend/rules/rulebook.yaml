@@ -29,9 +29,14 @@ exits:
   # stop up behind its peak, so winners lock in profit and a trade "almost never closes
   # red". Losers that never arm the trail get cut at the hard stop. Deterministic,
   # enforced on every open position, every cycle (the LLM never overrides an exit).
-  trail_arm_pct: 0.8           # once +0.8% in profit → arm the trailing stop
-  trail_distance_pct: 0.5      # then exit if price falls 0.5% below its peak (banks the gain)
-  take_profit_pct: 2.5         # hard backstop — a fast spike is taken (trail usually fires first)
+  # Calibrated so a banked trade ALWAYS clears the ~0.66% round-trip cost: the locked
+  # floor is (arm − trail) = +0.8% gross ≈ +0.14% net on conservative paper fees, and
+  # ~+0.6% net live on a V3 pool. No more "green" exits that quietly lose to fees.
+  trail_arm_pct: 1.2           # only arm the trail once a trade is genuinely up (+1.2%)
+  trail_distance_pct: 0.4      # then exit if it falls 0.4% below its PEAK — winners still RUN
+                               # as long as they make new highs; only sold once the run rolls over
+  take_profit_pct: 8.0         # extreme-spike backstop only (rare). The trailing stop does the
+                               # work below this, so winners are NOT capped at a fixed target
   stop_loss_pct: 3.0           # −3.0% on an un-armed position → cut it, well inside the DD ceiling
   min_hold_minutes: 0          # no minimum hold; exits may fire the next cycle
 

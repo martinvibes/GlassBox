@@ -121,19 +121,30 @@ class Reasoner:
             tok = self.s.allowlist.get(s)
             return bool(tok and tok.is_stable)
         volatile_held = [s for s in portfolio.positions if not is_stable(s)]
-        scores = {s: self._score_token(b)[0] for s, b in (signals.tokens or {}).items()
+        scored = {s: self._score_token(b) for s, b in (signals.tokens or {}).items()
                   if s in self.s.allowlist and not is_stable(s)}
         # a held name broke its uptrend → decide (prune)
-        if any(scores.get(s, -1.0) <= 0.0 for s in volatile_held):
+        if any(scored.get(s, (-1.0, ""))[0] <= 0.0 for s in volatile_held):
             return True
-        # free slot + a fresh candidate clearing the quality bar → decide (add)
+        # free slot + a fresh candidate that's a GOOD opportunity (clears the fear-scaled
+        # bar and is an allowed setup) → decide (add). Otherwise we hold / let winners run.
         max_slots = int(self.s.rulebook["sizing"].get("max_concurrent_positions", 6))
-        bar = self._min_entry_score()
-        fresh = any(sc >= bar and s not in volatile_held for s, sc in scores.items())
+        fresh = any(self._is_opportunity(sc, kind, signals) and s not in volatile_held
+                    for s, (sc, kind) in scored.items())
         return len(volatile_held) < max_slots and fresh
 
-    def _min_entry_score(self) -> float:
-        return float(self.s.rulebook.get("conviction_entry", {}).get("min_entry_score", 0.0) or 0.0)
+    def _entry_bar(self, signals: Signals) -> float:
+        """Quality bar with a MILD lift as fear deepens — selective, but still trades
+        genuine setups consistently rather than going idle through every fearful tape."""
+        base = float(self.s.rulebook.get("conviction_entry", {}).get("min_entry_score", 0.012) or 0.012)
+        fg = signals.fear_greed if signals.fear_greed is not None else 50
+        return base * (1.0 + max(0, 30 - fg) / 60.0)   # e.g. F&G 15 → ×1.25, F&G ≥30 → ×1.0
+
+    def _is_opportunity(self, score: float, kind: str, signals: Signals) -> bool:
+        """A 'good trade' = clears the bar. Both momentum (24h green) and reclaim dips
+        (24h red but 1h turning UP) qualify — the 1h-reclaim requirement already keeps us
+        out of falling knives, and the tight stop caps any setup that fails."""
+        return score >= self._entry_bar(signals)
 
     # ── deterministic exits: trailing stop, hard stop, take-profit backstop ──
     def _check_exits(self, signals: Signals, portfolio: Portfolio) -> TradeProposal | None:
@@ -207,13 +218,12 @@ class Reasoner:
         held = [s for s, t in self.s.allowlist.items()
                 if s in portfolio.positions and not t.is_stable]
         max_slots = int(self.s.rulebook["sizing"].get("max_concurrent_positions", 6))
-        bar = self._min_entry_score()
         fresh: list[dict] = []
         for sym, blob in (signals.tokens or {}).items():
             if sym not in self.s.allowlist or self.s.allowlist[sym].is_stable or sym in held:
                 continue
             sc, kind = self._score_token(blob)
-            if sc >= bar:
+            if self._is_opportunity(sc, kind, signals):
                 fresh.append({"symbol": sym, "kind": kind, "score": round(sc, 4),
                               "m1h": blob.get("momentum_1h"), "m24h": blob.get("momentum_24h"),
                               "m7d": blob.get("momentum_7d")})
@@ -378,11 +388,11 @@ class Reasoner:
                 proposed_regime=signals.regime, source="heuristic",
             )
 
-        # 3. ADD: if there's a free slot and a fresh candidate that CLEARS THE QUALITY
-        #    BAR (a real reclaim/momentum setup, not a marginal one) we don't already
-        #    hold, deploy into it. In a weak market nothing clears the bar → hold cash.
-        bar = self._min_entry_score()
-        candidates = [(sc, s, k) for sc, s, k in healthy if sc >= bar and s not in volatile_held]
+        # 3. ADD: if there's a free slot and a fresh candidate that's a GOOD OPPORTUNITY
+        #    (clears the fear-scaled bar; momentum-only in fear) we don't already hold,
+        #    deploy into it. When nothing qualifies → hold cash (don't force a trade).
+        candidates = [(sc, s, k) for sc, s, k in healthy
+                      if self._is_opportunity(sc, k, signals) and s not in volatile_held]
         if candidates and len(volatile_held) < max_slots:
             sc, sym, kind = candidates[0]
             bb2 = signals.tokens.get(sym, {})

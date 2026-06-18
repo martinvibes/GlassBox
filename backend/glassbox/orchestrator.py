@@ -83,9 +83,12 @@ class Orchestrator:
         #    wallet convert) ALWAYS takes priority and executes regardless of mode.
         #    Otherwise the active mode drives: dca schedule, manual standby, or AI.
         if paused:
-            proposal = TradeProposal(
+            # PAUSE stops NEW entries — but risk exits (stop-loss / trailing stop) STILL
+            # fire, so a paused agent never lets an open loser blow past its stop.
+            exit_proposal = self.reasoner._check_exits(signals, self.portfolio)
+            proposal = exit_proposal or TradeProposal(
                 action=Action.HOLD, conviction=0.0,
-                rationale="paused by operator from the console — standing down.",
+                rationale="paused by operator — standing down (risk exits still active).",
                 proposed_regime=signals.regime, source="operator",
             )
         elif self._command_pending():

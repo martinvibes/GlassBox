@@ -333,7 +333,7 @@ export default function AgentConsole() {
           <ChevronDown size={14} className="text-[var(--color-faint)] transition-transform" style={{ transform: showRisk ? "rotate(180deg)" : "none" }} />
         </button>
         {showRisk && m && (
-          <div className="flex flex-col gap-4 pb-1">
+          <div className="flex flex-col gap-2.5 pb-1">
             <Slider label="drawdown ceiling" value={m.ceiling} min={2} max={28} step={1} suffix="%"
               hint={`auto-flatten · DQ at ${data?.competitionCapPct ?? 30}%`} accent="var(--color-amber)"
               onChange={(v) => setM({ ...m, ceiling: v })} onCommit={(v) => commitMandate({ internal_ceiling_pct: v })} />
@@ -343,7 +343,7 @@ export default function AgentConsole() {
             <Slider label="conviction threshold" value={m.conv} min={0.4} max={0.95} step={0.01} suffix=""
               hint="min confidence (AI mode)" accent="var(--color-cyan)" fmt={(v) => v.toFixed(2)}
               onChange={(v) => setM({ ...m, conv: v })} onCommit={(v) => commitMandate({ min_score_to_enter: v })} />
-            <Slider label="max trades / day" value={m.trades} min={1} max={20} step={1} suffix=""
+            <Slider label="max trades / day" value={m.trades} min={1} max={50} step={1} suffix=""
               hint="churn / fee guard" accent="var(--color-violet)"
               onChange={(v) => setM({ ...m, trades: Math.round(v) })} onCommit={(v) => commitMandate({ max_trades_per_day: Math.round(v) })} />
           </div>
@@ -388,19 +388,29 @@ function Slider({ label: l, value, min, max, step, suffix, hint, accent, fmt, on
   label: string; value: number; min: number; max: number; step: number; suffix: string;
   hint: string; accent: string; fmt?: (v: number) => string; onChange: (v: number) => void; onCommit: (v: number) => void;
 }) {
+  const pct = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
   return (
-    <div>
-      <div className="flex items-baseline justify-between mb-1.5">
-        <span className="label">{l}</span>
-        <span className="tnum text-[14px]" style={{ color: accent }}>{fmt ? fmt(value) : value}{suffix}</span>
+    <div className="panel px-4 py-3">
+      <div className="flex items-end justify-between mb-3">
+        <div>
+          <div className="text-[12.5px] text-[var(--color-fg)] leading-none">{l}</div>
+          <div className="label mt-1.5" style={{ fontSize: 9, letterSpacing: "0.14em" }}>{hint}</div>
+        </div>
+        <span className="tnum text-[22px] font-semibold leading-none" style={{ color: accent, textShadow: `0 0 18px ${accent}44` }}>
+          {fmt ? fmt(value) : value}{suffix}
+        </span>
       </div>
-      <input type="range" min={min} max={max} step={step} value={value}
+      <input
+        type="range" min={min} max={max} step={step} value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
         onPointerUp={(e) => onCommit(parseFloat((e.target as HTMLInputElement).value))}
         onKeyUp={(e) => onCommit(parseFloat((e.target as HTMLInputElement).value))}
-        className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
-        style={{ accentColor: accent, background: "rgba(255,255,255,0.08)" }} />
-      <div className="label mt-1" style={{ letterSpacing: "0.1em" }}>{hint}</div>
+        className="mandate-slider"
+        style={{
+          background: `linear-gradient(90deg, ${accent} ${pct}%, rgba(255,255,255,0.08) ${pct}%)`,
+          ["--thumb" as string]: accent,
+        }}
+      />
     </div>
   );
 }

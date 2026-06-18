@@ -163,6 +163,41 @@ body::before {
   animation: loadbar-sweep 1.05s ease-in-out infinite;
 }
 
+/* ── premium range slider (risk mandate) ────────────────────────────────── */
+.mandate-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 99px;
+  cursor: pointer;
+  outline: none;
+}
+.mandate-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 3px solid var(--thumb, #fff);
+  box-shadow: 0 0 0 4px rgba(8, 8, 11, 0.6), 0 0 14px -2px var(--thumb, #fff);
+  cursor: grab;
+  transition: transform 0.12s ease;
+}
+.mandate-slider::-webkit-slider-thumb:hover { transform: scale(1.18); }
+.mandate-slider::-webkit-slider-thumb:active { cursor: grabbing; transform: scale(1.05); }
+.mandate-slider::-moz-range-thumb {
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 3px solid var(--thumb, #fff);
+  box-shadow: 0 0 14px -2px var(--thumb, #fff);
+  cursor: grab;
+}
+.mandate-slider::-moz-range-track { background: transparent; }
+
 /* kill number-input spinner arrows */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }

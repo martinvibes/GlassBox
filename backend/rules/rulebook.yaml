@@ -37,11 +37,12 @@ exits:
                                # as long as they make new highs; only sold once the run rolls over
   take_profit_pct: 8.0         # extreme-spike backstop only (rare). The trailing stop does the
                                # work below this, so winners are NOT capped at a fixed target
-  stop_loss_pct: 3.0           # −3.0% on an un-armed position → cut it, well inside the DD ceiling
+  stop_loss_pct: 1.5           # −1.5% on an un-armed position → cut losers FAST, keep losses small
   min_hold_minutes: 0          # no minimum hold; exits may fire the next cycle
 
 conviction_entry:
-  min_entry_score: 0.012       # quality bar — only deploy on a real setup; below this, wait in cash
+  min_entry_score: 0.012       # quality bar — trade genuine reclaim/momentum setups; only the
+                               # weakest/marginal ones are skipped (consistency, not idleness)
 
 limits:
   max_trades_per_day: 30       # headroom for active rotation (cooldown + caps still bound it)
@@ -53,10 +54,12 @@ conviction:
   min_score_to_add: 0.72       # higher bar to ADD to an existing position
 
 activity:
-  # Competition requires minimum activity. We satisfy it deliberately and safely.
+  # No FORCED trades — the agent trades only genuine opportunities (real setups easily
+  # satisfy any activity floor over the window). Re-enable min_trades_per_day if the
+  # competition rulebook confirms a hard daily-activity requirement.
   min_trades_total: 7          # over the whole live window (confirm exact)
-  min_trades_per_day: 1        # ensure we never get DQ'd for inactivity
-  activity_trade_max_pct: 3.0  # a forced "keep-alive" trade is tiny by design
+  min_trades_per_day: 0        # 0 = never force a keep-alive trade (opportunity-only)
+  activity_trade_max_pct: 3.0  # (only used if the floor is re-enabled)
 
 # Regime postures map a perceived market regime → how aggressive we may be.
 # The gate clamps proposals to the posture. Only true capitulation (risk_off) fully

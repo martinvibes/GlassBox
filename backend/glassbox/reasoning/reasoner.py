@@ -140,10 +140,22 @@ class Reasoner:
         fg = signals.fear_greed if signals.fear_greed is not None else 50
         return base * (1.0 + max(0, 30 - fg) / 60.0)   # e.g. F&G 15 → ×1.25, F&G ≥30 → ×1.0
 
+    def _market_breadth(self, signals: Signals) -> float:
+        """Fraction of the tradeable universe in a 7d uptrend. Low breadth = the WHOLE
+        market is falling, where individual 'reclaims' are bull traps that just stop out."""
+        vol = [b for s, b in (signals.tokens or {}).items()
+               if s in self.s.allowlist and not self.s.allowlist[s].is_stable]
+        if not vol:
+            return 0.0
+        return sum(1 for b in vol if float(b.get("momentum_7d", 0.0)) > 0) / len(vol)
+
     def _is_opportunity(self, score: float, kind: str, signals: Signals) -> bool:
-        """A 'good trade' = clears the bar. Both momentum (24h green) and reclaim dips
-        (24h red but 1h turning UP) qualify — the 1h-reclaim requirement already keeps us
-        out of falling knives, and the tight stop caps any setup that fails."""
+        """A 'good trade' = the BROAD market is healthy enough to trade AND this name
+        clears the bar. Both momentum and reclaim dips qualify, but we DON'T fight a
+        broad downtrend — when most of the market is below its 7d trend, every reclaim
+        is a trap, so we sit in cash and wait for breadth to turn."""
+        if self._market_breadth(signals) < 0.40:     # broad downtrend → no new entries
+            return False
         return score >= self._entry_bar(signals)
 
     # ── deterministic exits: trailing stop, hard stop, take-profit backstop ──
@@ -240,7 +252,10 @@ class Reasoner:
             held_brief.append({"symbol": sym, "value_usd": round(pos.qty * mark, 2), "gain_pct": round(gain, 2)})
         user_payload = {
             "market": {"regime": signals.regime.value, "fear_greed": signals.fear_greed,
-                       "btc_24h_pct": round(float((signals.tokens.get("BTCB") or {}).get("momentum_24h", 0.0)) * 100, 2)},
+                       "btc_24h_pct": round(float((signals.tokens.get("BTCB") or {}).get("momentum_24h", 0.0)) * 100, 2),
+                       "breadth_7d_pct": round(self._market_breadth(signals) * 100),
+                       "note": ("BROAD DOWNTREND — most of the market is below its 7d trend; "
+                                "reclaims are traps here, stay in cash." if self._market_breadth(signals) < 0.40 else "")},
             "portfolio": {"cash_usd": round(portfolio.cash_usd, 2),
                           "equity_usd": round(portfolio.equity_usd(signals.prices_usd), 2),
                           "held": held_brief, "free_slots": slots_remaining},

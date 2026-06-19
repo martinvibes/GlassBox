@@ -16,6 +16,8 @@ export default function TxHistory() {
   const fills = (data?.decisions ?? []).filter(
     (r) => r.execution?.ok && r.execution.notional_usd > 0 && r.execution.action !== "hold"
   );
+  const net = fills.reduce((a, r) => a + (r.execution?.realized_pnl_usd ?? 0), 0);
+  const netUp = net >= 0;
 
   return (
     <div className="glass flex flex-col h-full overflow-hidden">
@@ -24,7 +26,14 @@ export default function TxHistory() {
           <Receipt size={14} className="text-[var(--color-mint)]" />
           <span className="label">transaction history</span>
         </div>
-        <span className="label">{fills.length} fills</span>
+        <div className="flex items-center gap-3">
+          {Math.abs(net) > 0.004 && (
+            <span className="tnum text-[11px]" style={{ color: netUp ? "var(--color-mint)" : "var(--color-danger)" }}>
+              net {netUp ? "+" : "−"}${Math.abs(net).toFixed(2)}
+            </span>
+          )}
+          <span className="label">{fills.length} fills</span>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto">
@@ -42,6 +51,10 @@ export default function TxHistory() {
           const tradeSym = e.action === "swap" ? (isBuy ? e.symbol : r.decision.from_symbol || e.symbol) : e.symbol;
           const tx = e.tx_hash ?? "";
           const isPaper = tx.startsWith("0xpaper") || e.venue === "paper";
+          const isClose = e.action === "sell" || (e.action === "swap" && !isBuy);
+          const realized = e.realized_pnl_usd ?? 0;
+          const showPnl = isClose && Math.abs(realized) > 0.004;
+          const up = realized >= 0;
           return (
             <div
               key={`${r.cycle_id}-${r.ts}`}
@@ -74,9 +87,15 @@ export default function TxHistory() {
 
               <div className="text-right">
                 <div className="tnum text-[13px]">{money(e.notional_usd)}</div>
-                <div className="tnum text-[10px] text-[var(--color-faint)]">
-                  {e.filled_qty.toLocaleString("en-US", { maximumFractionDigits: 5 })} {pl(e.symbol)} @ {money(e.fill_price_usd)}
-                </div>
+                {showPnl ? (
+                  <div className="tnum text-[11px] font-medium" style={{ color: up ? "var(--color-mint)" : "var(--color-danger)" }}>
+                    {up ? "+" : "−"}${Math.abs(realized).toFixed(2)} {up ? "profit" : "loss"}
+                  </div>
+                ) : (
+                  <div className="tnum text-[10px] text-[var(--color-faint)]">
+                    {e.filled_qty.toLocaleString("en-US", { maximumFractionDigits: 5 })} {pl(e.symbol)} @ {money(e.fill_price_usd)}
+                  </div>
+                )}
               </div>
 
               <div className="text-right w-[64px] shrink-0">

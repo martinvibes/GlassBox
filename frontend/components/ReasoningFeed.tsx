@@ -65,7 +65,12 @@ export default function ReasoningFeed() {
                       {a.toUpperCase()}
                       {r.proposal.symbol && (
                         <span className="text-[var(--color-fg)]">
-                          {pl(r.proposal.symbol)}<span className="text-[var(--color-faint)]">/USDT</span>
+                          {pl(r.proposal.symbol)}
+                          <span className="text-[var(--color-faint)]">
+                            {a === "swap" && r.proposal.to_symbol
+                              ? `→${pl(r.proposal.to_symbol)}`
+                              : "/USDT"}
+                          </span>
                         </span>
                       )}
                     </span>

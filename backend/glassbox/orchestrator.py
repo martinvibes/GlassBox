@@ -181,10 +181,18 @@ class Orchestrator:
             self.portfolio.positions[other].value_usd(1.0)
             if other in self.portfolio.positions else 0.0
         )
-        if max(base_avail, other_avail) < self.s.rulebook["sizing"]["min_trade_usd"]:
-            return None  # no stable balance to swap → skip rather than force risk
+        min_usd = float(self.s.rulebook["sizing"]["min_trade_usd"])
+        avail = max(base_avail, other_avail)
+        if avail < min_usd:
+            return None  # not enough stable to clear the min trade size → skip
+        # Size to the configured % of equity, but ALWAYS clear the min-trade floor and
+        # never exceed the stable we hold. Critical on a small book: 1% of a $10 wallet
+        # is $0.10 — below the $1 min — and the gate would block it → inactivity DQ.
+        equity = self.portfolio.equity_usd(signals.prices_usd)
+        pct = float(self.s.rulebook["activity"]["activity_trade_max_pct"])
+        target_usd = min(avail, max(min_usd * 1.25, equity * pct / 100.0))
+        size = (target_usd / equity * 100.0) if equity > 0 else 0.0
         frm, to = (base_ccy, other) if base_avail >= other_avail else (other, base_ccy)
-        size = float(self.s.rulebook["activity"]["activity_trade_max_pct"])
         return TradeProposal(
             action=Action.SWAP, symbol=frm, to_symbol=to, size_pct=size, conviction=1.0,
             rationale=(f"activity-floor keep-alive: tiny zero-risk {frm}→{to} stablecoin swap "

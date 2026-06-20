@@ -19,6 +19,7 @@ export interface Signals {
 export interface Proposal {
   action: Action;
   symbol: string;
+  to_symbol?: string;   // SWAP only: the destination token
   size_pct: number;
   conviction: number;
   rationale: string;

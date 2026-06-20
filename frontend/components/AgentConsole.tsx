@@ -146,6 +146,24 @@ export default function AgentConsole() {
   };
   const commitMandate = (patch: Record<string, number>) => post("/api/mandate", patch);
 
+  // Close ALL positions to cash — works instantly whether or not the agent is running
+  // (paper flattens server-side; live queues for the signer). No 28s poll, no hang.
+  const closeAll = async () => {
+    const pos = data?.portfolio?.positions ?? {};
+    const vol = Object.keys(pos).filter((s) => s !== "USDT" && s !== "USDC");
+    if (vol.length === 0) { toast.show("info", "No open positions to close."); return; }
+    const id = toast.loading(`Closing ${vol.length} position${vol.length > 1 ? "s" : ""}…`);
+    try {
+      const res = await fetch("/api/flatten", { method: "POST" }).then((r) => r.json());
+      if (res.queued) { toast.update(id, "info", "Live flatten queued — start the agent to execute it on-chain."); return; }
+      if (res.ok) {
+        const rt = res.realizedTotal ?? 0;
+        toast.update(id, rt >= 0 ? "success" : "info",
+          `Closed ${res.closed?.length ?? 0} to cash · ${rt >= 0 ? "+" : "−"}${money(Math.abs(rt))} realized`);
+      } else { toast.update(id, "error", "Couldn't close — try again"); }
+    } catch { toast.update(id, "error", "Network error — try again"); }
+  };
+
   const running = paused === false;
   const latest = data?.latest;
   const intentAction = (latest?.proposal.action ?? "hold") as Action;
@@ -309,9 +327,10 @@ export default function AgentConsole() {
                 ? <>Holding <span className="text-[var(--color-fg)]">{(positions[manTo]?.qty ?? 0).toLocaleString("en-US", { maximumFractionDigits: 4 })} {label(manTo)}</span> — Sell closes it.</>
                 : <>Buy opens a {label(manTo)} position · Sell closes one you hold.</>}
             </p>
-            <button onClick={() => sendCommand("flatten")}
-              className="w-full flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[13px] hairline text-[var(--color-muted)] hover:text-[var(--color-danger)] transition-colors">
-              <XCircle size={14} /> Close all positions{anyPos ? ` (${Object.keys(positions).length})` : ""}
+            <button onClick={closeAll} disabled={!anyPos}
+              className="w-full flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[13px] font-medium transition-transform enabled:hover:scale-[1.01] active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{ background: "rgba(255,93,108,0.12)", color: "var(--color-danger)" }}>
+              <XCircle size={14} /> Close all positions{anyPos ? ` (${Object.keys(positions).filter((s) => s !== "USDT" && s !== "USDC").length})` : ""}
             </button>
             <p className="label" style={{ letterSpacing: "0.1em" }}>routed through the gate · fills in seconds</p>
           </div>

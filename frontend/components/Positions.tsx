@@ -1,9 +1,24 @@
 "use client";
 import { motion } from "framer-motion";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, XCircle } from "lucide-react";
 import { money, short } from "@/lib/format";
+import { toast } from "@/lib/toast";
 import TokenIcon from "./TokenIcon";
 import type { Portfolio } from "@/lib/types";
+
+async function closeAllPositions(count: number) {
+  if (count === 0) { toast.show("info", "No open positions to close."); return; }
+  const id = toast.loading(`Closing ${count} position${count > 1 ? "s" : ""}…`);
+  try {
+    const res = await fetch("/api/flatten", { method: "POST" }).then((r) => r.json());
+    if (res.queued) { toast.update(id, "info", "Live flatten queued — start the agent to execute it on-chain."); return; }
+    if (res.ok) {
+      const rt = res.realizedTotal ?? 0;
+      toast.update(id, rt >= 0 ? "success" : "info",
+        `Closed ${res.closed?.length ?? 0} to cash · ${rt >= 0 ? "+" : "−"}${money(Math.abs(rt))} realized`);
+    } else { toast.update(id, "error", "Couldn't close — try again"); }
+  } catch { toast.update(id, "error", "Network error — try again"); }
+}
 
 // display: trading-pair label (BNB/USDT, BTC/USDT, …)
 const PAIR: Record<string, string> = { WBNB: "BNB", BTCB: "BTC", ETH: "ETH", SOL: "SOL", CAKE: "CAKE" };
@@ -44,6 +59,13 @@ export default function Positions({
             </span>
           )}
           <span className="label">{open.length} open</span>
+          {open.length > 0 && (
+            <button onClick={() => closeAllPositions(open.length)}
+              className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full font-medium transition-transform hover:scale-[1.03] active:scale-95"
+              style={{ background: "rgba(255,93,108,0.12)", color: "var(--color-danger)" }}>
+              <XCircle size={12} /> close all
+            </button>
+          )}
         </div>
       </div>
 

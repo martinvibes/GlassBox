@@ -1,0 +1,19 @@
+# Keep the build context small + never ship secrets/runtime state into the image
+**/node_modules
+**/.next
+**/.venv
+**/venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/*.egg-info
+backend/data
+**/.env
+**/.env.local
+**/.env*.local
+**/*.log
+.git
+.github
+docs/superpowers
+*.md
+!docs/DEPLOY.md

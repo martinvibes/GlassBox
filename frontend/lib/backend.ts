@@ -68,14 +68,21 @@ export async function readAllowlistTokens(): Promise<AllowToken[]> {
 
 // Minimal .env parse (server-side) to surface wallet + mode in the UI.
 export async function readEnv(): Promise<Record<string, string>> {
-  const raw = await readText(path.join(BACKEND, ".env"));
   const out: Record<string, string> = {};
-  if (!raw) return out;
-  for (const line of raw.split("\n")) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
-    if (m && !line.trim().startsWith("#")) {
-      out[m[1]] = m[2].replace(/^["']|["']$/g, "");
+  // local dev: read the gitignored backend/.env file
+  const raw = await readText(path.join(BACKEND, ".env"));
+  if (raw) {
+    for (const line of raw.split("\n")) {
+      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
+      if (m && !line.trim().startsWith("#")) {
+        out[m[1]] = m[2].replace(/^["']|["']$/g, "");
+      }
     }
+  }
+  // cloud (Railway/Render/etc.): there's no .env file — env vars arrive as process.env,
+  // so overlay the ones the dashboard surfaces (mode + wallet address).
+  for (const k of ["GLASSBOX_MODE", "TWAK_WALLET_ADDRESS", "GLASSBOX_LLM_MODEL"]) {
+    if (process.env[k]) out[k] = process.env[k] as string;
   }
   return out;
 }

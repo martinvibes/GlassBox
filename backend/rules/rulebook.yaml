@@ -54,12 +54,16 @@ conviction:
   min_score_to_add: 0.72       # higher bar to ADD to an existing position
 
 activity:
-  # No FORCED trades — the agent trades only genuine opportunities (real setups easily
-  # satisfy any activity floor over the window). Re-enable min_trades_per_day if the
-  # competition rulebook confirms a hard daily-activity requirement.
-  min_trades_total: 7          # over the whole live window (confirm exact)
-  min_trades_per_day: 0        # 0 = never force a keep-alive trade (opportunity-only)
-  activity_trade_max_pct: 3.0  # (only used if the floor is re-enabled)
+  # The competition REQUIRES ≥1 trade/day (7 over the live window) or you're DQ'd for
+  # inactivity — confirmed on the DoraHacks rulebook. So we enforce a daily floor. The
+  # keep-alive is a TINY, ZERO-RISK swap between two in-scope STABLECOINS (USDT↔USDC):
+  # both are on the eligible-token list, so it counts as a qualifying trade, yet we stay
+  # fully in stablecoin (honoring "survival > alpha" even on capitulation days, when a
+  # volatile probe would correctly be blocked by the risk_off posture). Real opportunity
+  # trades already satisfy the floor on active days, so the probe only fires on quiet ones.
+  min_trades_total: 7          # over the whole live window
+  min_trades_per_day: 1        # ≥1 trade/day or DQ → enforce a keep-alive backstop
+  activity_trade_max_pct: 1.0  # keep-alive swap size (% of equity) — tiny, stable↔stable
 
 # Regime postures map a perceived market regime → how aggressive we may be.
 # The gate clamps proposals to the posture. Only true capitulation (risk_off) fully

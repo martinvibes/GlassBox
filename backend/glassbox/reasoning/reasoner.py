@@ -122,7 +122,8 @@ class Reasoner:
             return bool(tok and tok.is_stable)
         volatile_held = [s for s in portfolio.positions if not is_stable(s)]
         scored = {s: self._score_token(b) for s, b in (signals.tokens or {}).items()
-                  if s in self.s.allowlist and not is_stable(s)}
+                  if s in self.s.allowlist and not is_stable(s)
+                  and self.s.allowlist[s].tradeable}
         # a held name broke its uptrend → decide (prune)
         if any(scored.get(s, (-1.0, ""))[0] <= 0.0 for s in volatile_held):
             return True
@@ -232,7 +233,8 @@ class Reasoner:
         max_slots = int(self.s.rulebook["sizing"].get("max_concurrent_positions", 6))
         fresh: list[dict] = []
         for sym, blob in (signals.tokens or {}).items():
-            if sym not in self.s.allowlist or self.s.allowlist[sym].is_stable or sym in held:
+            if (sym not in self.s.allowlist or self.s.allowlist[sym].is_stable
+                    or not self.s.allowlist[sym].tradeable or sym in held):
                 continue
             sc, kind = self._score_token(blob)
             if self._is_opportunity(sc, kind, signals):
@@ -351,6 +353,8 @@ class Reasoner:
         for sym, blob in (signals.tokens or {}).items():
             if sym not in self.s.allowlist or _is_stable(sym):
                 continue
+            if not self.s.allowlist[sym].tradeable:
+                continue  # signal-only (BTC/BNB regime proxy) → never an entry candidate
             slip = blob.get("est_slippage_bps")
             if slip is not None and float(slip) > self.s.rulebook["limits"]["max_slippage_bps"]:
                 continue

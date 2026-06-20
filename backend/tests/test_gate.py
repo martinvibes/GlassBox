@@ -197,6 +197,35 @@ def test_hold_passes_through():
     assert d.action == Action.HOLD
 
 
+# ── activity floor (≥1 trade/day or DQ) ─────────────────────────────────────
+def test_needs_activity_trade_tracks_daily_floor():
+    """The keep-alive backstop must trigger when we're under the daily floor and
+    stop once we've traded — otherwise an idle day = inactivity DQ."""
+    st = RiskState()
+    st.roll_day(NOW)
+    assert G.needs_activity_trade(st, RULEBOOK, NOW) is True   # 0 trades today
+    st.record_trade(NOW)
+    assert G.needs_activity_trade(st, RULEBOOK, NOW) is False  # floor satisfied
+    # next day resets → floor applies again
+    next_day = datetime(2026, 6, 23, 0, 0, 0, tzinfo=timezone.utc)
+    assert G.needs_activity_trade(st, RULEBOOK, next_day) is True
+
+
+def test_stable_swap_keepalive_passes_in_risk_off():
+    """A tiny stable↔stable keep-alive swap must clear the gate even in risk_off
+    (when volatile buys are blocked) so the ≥1-trade/day floor is always met with
+    ZERO market exposure. This is the DQ-prevention path."""
+    rb = {**RULEBOOK, "_allowlist_symbols": {"USDT", "USDC", "WBNB", "BTCB"}}
+    pf = _flat_portfolio(cash=1000.0)
+    sig = Signals(regime=Regime.RISK_OFF, prices_usd={"USDT": 1.0, "USDC": 1.0}, tokens={})
+    swap = TradeProposal(action=Action.SWAP, symbol="USDT", to_symbol="USDC",
+                         size_pct=3.0, conviction=1.0)
+    d = G.evaluate(swap, pf, sig, RiskState(), rb, NOW)
+    assert d.verdict in (GateVerdict.ALLOW, GateVerdict.CLAMP)
+    assert d.action == Action.SWAP
+    assert d.approved_notional_usd > 0
+
+
 # ── fail-safe ──────────────────────────────────────────────────────────────
 def test_gate_fails_safe_on_bad_input():
     # malformed rulebook (missing keys) must BLOCK, not raise

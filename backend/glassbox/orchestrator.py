@@ -53,8 +53,13 @@ class Orchestrator:
         self.audit = AuditLog(settings.data_dir)
         self.portfolio = state_store.load_portfolio(settings)
         self.risk_state = RiskState()
-        # expose allowlist symbols to the (pure) gate via the rulebook dict
-        self.s.rulebook["_allowlist_symbols"] = set(settings.allowlist.keys())
+        # expose TRADEABLE allowlist symbols to the (pure) gate via the rulebook dict.
+        # Signal-only tokens (BTC/BNB regime proxies) are excluded so the gate hard-blocks
+        # any buy of an off-list token even if a proposal slips through — trades outside the
+        # competition's eligible list don't count.
+        self.s.rulebook["_allowlist_symbols"] = {
+            s for s, t in settings.allowlist.items() if t.tradeable
+        }
         self.anchor.register_identity()
 
     # ── one heartbeat ────────────────────────────────────────────────────
@@ -155,32 +160,35 @@ class Orchestrator:
         return record
 
     def _activity_probe(self, signals: Signals) -> TradeProposal | None:
-        """A deliberately tiny keep-alive trade to satisfy the activity floor.
-        Only when FLAT (real momentum trades already satisfy activity when deployed)
-        and in a non-risk_off regime, into the most liquid non-stable token."""
-        from glassbox.models import Regime
-
-        if signals.regime == Regime.RISK_OFF:
-            return None
-        # already holding a volatile position → we're active; no keep-alive needed
-        holds_volatile = any(
-            s not in self.s.allowlist or not self.s.allowlist[s].is_stable
-            for s in self.portfolio.positions
+        """Zero-risk keep-alive to satisfy the competition's ≥1-trade/day floor WITHOUT
+        taking any market exposure: a tiny swap between two in-scope STABLECOINS
+        (e.g. USDT↔USDC). Both are on the eligible-token list, so it counts as a
+        qualifying trade, yet the agent stays fully in stablecoin — honoring the
+        survival thesis even on capitulation (risk_off) days, when a volatile probe
+        would (correctly) be blocked by the regime posture. Fires regardless of regime
+        or what we hold (holding a position across a quiet day is NOT a trade); only
+        skipped if there's no second stable or no stable balance to swap."""
+        base_ccy = self.s.rulebook["capital"]["base_currency"]
+        other = next(
+            (s for s, t in self.s.allowlist.items() if t.is_stable and s != base_ccy),
+            None,
         )
-        if holds_volatile:
-            return None
-        candidates = [
-            s for s, b in (signals.tokens or {}).items()
-            if s in self.s.allowlist and not self.s.allowlist[s].is_stable
-        ]
-        if not candidates:
-            return None
-        sym = max(candidates, key=lambda s: signals.tokens[s].get("liquidity_usd", 0))
-        size = self.s.rulebook["activity"]["activity_trade_max_pct"]
+        if other is None:
+            return None  # no second stable to round-trip with → skip (never take risk)
+        # swap FROM whichever stable we hold more of, so the swap always has funds
+        base_avail = self.portfolio.cash_usd
+        other_avail = (
+            self.portfolio.positions[other].value_usd(1.0)
+            if other in self.portfolio.positions else 0.0
+        )
+        if max(base_avail, other_avail) < self.s.rulebook["sizing"]["min_trade_usd"]:
+            return None  # no stable balance to swap → skip rather than force risk
+        frm, to = (base_ccy, other) if base_avail >= other_avail else (other, base_ccy)
+        size = float(self.s.rulebook["activity"]["activity_trade_max_pct"])
         return TradeProposal(
-            action=Action.BUY, symbol=sym, size_pct=size,
-            conviction=self.s.rulebook["conviction"]["min_score_to_enter"],
-            rationale="activity-floor keep-alive probe (tiny, by design) to avoid inactivity DQ.",
+            action=Action.SWAP, symbol=frm, to_symbol=to, size_pct=size, conviction=1.0,
+            rationale=(f"activity-floor keep-alive: tiny zero-risk {frm}→{to} stablecoin swap "
+                       "to satisfy the ≥1 trade/day rule while staying fully in stablecoin."),
             proposed_regime=signals.regime, source="activity_floor",
         )
 

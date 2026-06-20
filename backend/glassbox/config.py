@@ -32,6 +32,9 @@ class TokenInfo:
     decimals: int
     is_stable: bool
     coingecko_id: str = ""     # price/momentum feed id (perception derives the universe from this)
+    tradeable: bool = True     # False = SIGNAL-ONLY (e.g. BTC/BNB regime proxies): observed for
+                               # regime/breadth context but NEVER bought — they're not on the
+                               # competition's eligible-token list, so trading them wouldn't count.
 
 
 @dataclass
@@ -83,6 +86,7 @@ def _load_allowlist(path: Path | None = None) -> dict[str, TokenInfo]:
             decimals=int(t["decimals"]),
             is_stable=bool(t.get("is_stable", False)),
             coingecko_id=str(t.get("coingecko_id", "")),
+            tradeable=bool(t.get("tradeable", True)),
         )
     return out
 

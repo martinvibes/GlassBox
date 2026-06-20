@@ -9,6 +9,11 @@ WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci || npm install
 COPY frontend/ ./
+# NEXT_PUBLIC_* vars are baked into the client bundle at BUILD time. Railway exposes
+# service variables to the Docker build, so this picks up NEXT_PUBLIC_PRIVY_APP_ID
+# and the Privy sign-in works on the deployed site (empty → falls back to ConnectWallet).
+ARG NEXT_PUBLIC_PRIVY_APP_ID=""
+ENV NEXT_PUBLIC_PRIVY_APP_ID=$NEXT_PUBLIC_PRIVY_APP_ID
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 

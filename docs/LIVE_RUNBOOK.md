@@ -55,6 +55,48 @@ Or run the dashboard locally (reads backend/data): `cd frontend && npm run dev`.
 twak swap <TOKEN_QTY> <TOKEN_ADDR> 0x55d398326f99059fF775485246999027B3197955 --chain bsc --slippage 0.8 --json
 ```
 
+## Going live on Railway (24/7 cloud — laptop-independent)
+
+Runs the live agent in the cloud so uptime doesn't depend on your Mac. The wallet still
+signs with TWAK; the keystore is shipped to Railway as encrypted env vars (the wallet file
+stays encrypted, the password is a separate var). Still self-custody — it's *your* deploy
+signing with *your* key, no third-party custodian.
+
+> Run the live agent in **ONE place only**. If you go cloud, do NOT also run `run_live.sh`
+> locally — two agents on one wallet would double-trade.
+
+**1. Generate the two keystore values** (run locally; copies to clipboard, never leaves your machine):
+```bash
+base64 -i ~/.twak/wallet.json      | tr -d '\n' | pbcopy   # → TWAK_WALLET_JSON_B64
+base64 -i ~/.twak/credentials.json | tr -d '\n' | pbcopy   # → TWAK_CREDENTIALS_JSON_B64
+```
+
+**2. Push** (rebuilds the image with the TWAK CLI baked in):
+```bash
+git push
+```
+
+**3. Set Railway env vars** (service → Variables) and redeploy:
+| Variable | Value |
+|---|---|
+| `GLASSBOX_MODE` | `live` |
+| `GLASSBOX_TRADE_AFTER` | `2026-06-22T07:00:00+01:00` |
+| `GLASSBOX_HEARTBEAT_SECONDS` | `120` |
+| `TWAK_WALLET_ADDRESS` | `0x3D0d14207eb8Ef26b5110786C4b625b67D9083BE` |
+| `TWAK_WALLET_PASSWORD` | *(your wallet password)* |
+| `TWAK_WALLET_JSON_B64` | *(from step 1)* |
+| `TWAK_CREDENTIALS_JSON_B64` | *(from step 1)* |
+| `TWAK_ACCESS_ID` / `TWAK_HMAC_SECRET` | *(your TWAK API creds)* |
+| `ANTHROPIC_API_KEY` | `sk-ant-...` |
+| `GLASSBOX_LLM_MODEL` | `claude-haiku-4-5-20251001` |
+| `GLASSBOX_CONTROL_SECRET` | *(optional — set any string to lock the dashboard's pause/flatten buttons; pass it as `?key=...` to use them)* |
+
+Keep the persistent volume mounted at `/app/backend/data`. On boot the container restores the
+keystore, reconciles the real wallet (~$10), stands by until 07:00, then trades. Watch it in
+Railway's deploy logs (look for `reconciled wallet: equity $9.98` and `standing by`).
+
+**Rotate** the wallet password + API keys after the competition (they lived in cloud env).
+
 ## Honest caveats
 - $10 is small: a normal position is ~10–22% of the book, and fees/slippage bite more than on
   a large book. The agent trades rarely and small by design.

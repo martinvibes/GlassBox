@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 import { readEnv, readPortfolio, readDecisions, writeCommand } from "@/lib/backend";
+import { denyIfUnauthorized } from "@/lib/guard";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -28,7 +29,9 @@ async function marks(syms: string[]): Promise<Record<string, number>> {
 
 // Close ALL open positions to cash. Works WITHOUT the agent running (paper mode is
 // flattened directly here; live mode queues a flatten command for the agent's signer).
-export async function POST() {
+export async function POST(req: Request) {
+  const denied = denyIfUnauthorized(req);
+  if (denied) return denied;
   const env = await readEnv();
   const mode = env.GLASSBOX_MODE ?? "paper";
   const pf = await readPortfolio();

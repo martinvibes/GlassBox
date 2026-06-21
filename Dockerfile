@@ -22,6 +22,9 @@ FROM node:20-bookworm-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 python3-venv python3-pip ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
+# Trust Wallet Agent Kit CLI — the live execution + signing layer. Needed in the
+# image so a cloud (Railway) deploy can run in live mode. In paper mode it's unused.
+RUN npm install -g @trustwallet/cli@0.19.1
 WORKDIR /app
 
 # Python trading agent + its deps (incl. anthropic for the Claude brain)

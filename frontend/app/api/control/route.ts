@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { readControl, writeControl, type ControlState } from "@/lib/backend";
+import { denyIfUnauthorized } from "@/lib/guard";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -9,6 +10,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const denied = denyIfUnauthorized(req);
+  if (denied) return denied;
   const body = await req.json().catch(() => ({}));
   const cur = await readControl();
   const next: ControlState = { ...cur };

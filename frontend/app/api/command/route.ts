@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { writeCommand } from "@/lib/backend";
+import { denyIfUnauthorized } from "@/lib/guard";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -7,6 +8,8 @@ export const revalidate = 0;
 // One-shot manual action; picked up by the backend within ~5s and routed through
 // the risk gate. swap = any token → any token; flatten = sell all to base.
 export async function POST(req: Request) {
+  const denied = denyIfUnauthorized(req);
+  if (denied) return denied;
   const body = await req.json().catch(() => ({}));
   const action = String(body.action ?? "").toLowerCase();
   if (!["swap", "buy", "sell", "flatten"].includes(action)) {

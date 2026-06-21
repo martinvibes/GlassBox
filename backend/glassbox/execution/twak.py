@@ -85,7 +85,11 @@ class Executor:
 
         base = self.s.base_currency
         slippage_pct = self.s.rulebook["limits"]["max_slippage_bps"] / 100.0
-        pw = None  # CLI uses OS keychain / inherited TWAK_WALLET_PASSWORD env
+        # On macOS the CLI can read the password from the OS keychain, but a headless
+        # host (Railway/Linux container) has no keychain — so pass the password from the
+        # (env-sourced) settings. It is never logged: build_swap_args keeps it out of any
+        # printed output. None falls back to keychain when the env var is unset.
+        pw = self.s.twak_wallet_password or None
 
         def asset(s: str) -> str:
             return bsc_token_ref(self.s.allowlist[s])

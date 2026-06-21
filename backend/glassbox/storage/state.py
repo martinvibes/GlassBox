@@ -46,6 +46,70 @@ def mark_to_market(portfolio: Portfolio, prices_usd: dict[str, float]) -> float:
     return eq
 
 
+def reconcile_from_wallet(
+    portfolio: Portfolio,
+    rows: list[dict],
+    allowlist: dict,
+    chain: str = "bsc",
+) -> bool:
+    """LIVE mode: refresh `portfolio` IN PLACE from real on-chain balances (the rows
+    from `twak wallet portfolio --json`). Pure + testable; the orchestrator passes the
+    parsed rows. Returns True if anything was reconciled, False if the rows were empty
+    (caller should keep the last-known book rather than wipe it — fail-safe).
+
+    Rules:
+      * Stablecoins (USDT/USDC) → summed into cash_usd (base-currency balance).
+      * Non-stable ALLOWLISTED tokens → positions (qty + USD mark from the wallet).
+        Held names keep their cost basis / trailing peak; newly-seen names get basis =
+        current mark. Names no longer on-chain are dropped (sold to dust).
+      * Everything else (e.g. BNB held only for gas, or off-list tokens) is IGNORED —
+        it is not tradeable equity, so it never inflates PnL or the drawdown gauge.
+    """
+    cash = 0.0
+    chain_tokens: dict[str, tuple[float, float]] = {}  # sym -> (qty, mark_usd)
+    seen_any = False
+    for r in rows:
+        if r.get("chain") != chain:
+            continue
+        seen_any = True
+        sym = r.get("symbol", "")
+        try:
+            bal = float(r.get("balance", 0) or 0)
+            usd = float(r.get("usdValue", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if bal <= 0:
+            continue
+        tok = allowlist.get(sym)
+        if tok is None:
+            continue  # off-list (incl. gas BNB) → not tradeable equity
+        if tok.is_stable:
+            cash += usd
+        else:
+            chain_tokens[sym] = (bal, (usd / bal) if bal else 0.0)
+    if not seen_any:
+        return False  # empty/failed read → keep last-known book (fail-safe)
+
+    portfolio.cash_usd = round(cash, 6)
+    for sym, (qty, mark) in chain_tokens.items():
+        if sym in portfolio.positions:
+            pos = portfolio.positions[sym]
+            pos.qty = qty
+            if pos.avg_price_usd <= 0:
+                pos.avg_price_usd = mark
+            pos.peak_price_usd = max(pos.peak_price_usd or mark, mark)
+        else:
+            portfolio.positions[sym] = Position(
+                symbol=sym, qty=qty, avg_price_usd=mark, peak_price_usd=mark
+            )
+    # drop volatile positions that are no longer on-chain (closed)
+    for sym in list(portfolio.positions):
+        tok = allowlist.get(sym)
+        if (tok is None or not tok.is_stable) and sym not in chain_tokens:
+            del portfolio.positions[sym]
+    return True
+
+
 # ── paper fills ─────────────────────────────────────────────────────────────
 def apply_paper_buy(
     portfolio: Portfolio, symbol: str, qty: float, fill_price: float, notional: float

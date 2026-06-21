@@ -12,17 +12,23 @@ capital:
   starting_equity_usd: 1000.0  # paper/live starting bankroll (set per live window)
 
 drawdown:
-  competition_cap_pct: 30.0    # the DQ line we MUST NOT cross (confirm exact value)
-  internal_ceiling_pct: 12.0   # OUR hard flatten-and-pause trigger (well inside the cap)
+  # Tuned for a SMALL live book ($10) with a "never lose ~$1" mandate. The internal
+  # ceiling (7%) flattens everything at ≈$0.70 down from the high-water mark — inside
+  # the operator's $1 line and far inside the 30% competition DQ cap.
+  competition_cap_pct: 30.0    # the DQ line we MUST NOT cross
+  internal_ceiling_pct: 7.0    # OUR hard flatten-and-pause trigger (≈$0.70 on a $10 book)
   pause_after_breach_hours: 12 # cool-off before re-deploying after an internal breach
 
 sizing:
-  max_position_pct: 25.0       # max % of equity in a single token position
-  max_gross_exposure_pct: 60.0 # max % of equity deployed across all positions at once
-  max_trade_pct: 15.0          # max % of equity moved in a single trade
-  min_trade_usd: 1.0           # floor: trade as little as $1 (parity with retail desks)
-  max_concurrent_positions: 6  # portfolio: hold up to N names at once (diversify, don't over-scalp)
-  target_position_pct: 9.0     # size each new entry to ~this, so the book diversifies
+  # Survival-first, FEW positions. Deploy at most ~2 names, modest size, so most of the
+  # book stays in stablecoin and a bad trade can only nick the equity (a position cut at
+  # the −1.5% stop loses ≈$0.03 on a $2 position).
+  max_position_pct: 30.0       # max % of equity in a single token position
+  max_gross_exposure_pct: 45.0 # hard ceiling on total deployed across all positions
+  max_trade_pct: 25.0          # max % of equity moved in a single trade (lets one buy fill a position)
+  min_trade_usd: 1.0           # floor: a trade must clear $1 (below this, fees dominate)
+  max_concurrent_positions: 2  # hold at most a FEW names at once — not many markets simultaneously
+  target_position_pct: 22.0    # size each new entry to ~this (≈$2.20 on a $10 book — clears the $1 min)
 
 exits:
   # A TRAILING stop is the real edge: once a position is modestly green we ratchet a
@@ -45,13 +51,13 @@ conviction_entry:
                                # weakest/marginal ones are skipped (consistency, not idleness)
 
 limits:
-  max_trades_per_day: 30       # headroom for active rotation (cooldown + caps still bound it)
-  trade_cooldown_minutes: 3    # min gap between AI BUYs (exits/sells are never cooled down)
+  max_trades_per_day: 6        # cap fee churn on a small book (cooldown + caps also bound it)
+  trade_cooldown_minutes: 5    # min gap between AI BUYs (exits/sells are never cooled down)
   max_slippage_bps: 80         # reject if quoted slippage exceeds this (0.80%)
 
 conviction:
-  min_score_to_enter: 0.55     # LLM/heuristic conviction floor to OPEN a position (0..1)
-  min_score_to_add: 0.72       # higher bar to ADD to an existing position
+  min_score_to_enter: 0.62     # selective: only OPEN on genuine high-conviction setups (0..1)
+  min_score_to_add: 0.78       # higher bar to ADD to an existing position
 
 activity:
   # The competition REQUIRES ≥1 trade/day (7 over the live window) or you're DQ'd for
@@ -69,10 +75,11 @@ activity:
 # The gate clamps proposals to the posture. Only true capitulation (risk_off) fully
 # stands the agent down; every other regime deploys, sized by conviction + these caps.
 regimes:
+  # Capped low — even fully deployed, most of the book stays in stablecoin (survival).
   risk_off:    { max_gross_exposure_pct: 0.0,  note: "capitulation → stay in stablecoin" }
-  neutral:     { max_gross_exposure_pct: 45.0, note: "diversified small probes across names" }
-  risk_on:     { max_gross_exposure_pct: 60.0, note: "deploy on conviction" }
-  euphoria:    { max_gross_exposure_pct: 45.0, note: "ride strength, fade froth carefully" }
+  neutral:     { max_gross_exposure_pct: 25.0, note: "one small probe at most" }
+  risk_on:     { max_gross_exposure_pct: 40.0, note: "deploy on conviction, still mostly cash" }
+  euphoria:    { max_gross_exposure_pct: 25.0, note: "ride strength, fade froth carefully" }
 
 defaults:
   posture: neutral             # unknown regime → trade small (not fully flat)

@@ -47,6 +47,7 @@ class Settings:
     base_currency: str
     # live-stack credentials (empty in paper mode)
     dry_run: bool = False     # live mode but QUOTE-ONLY: never broadcasts a swap
+    trade_after: str = ""     # ISO time; before it the agent stands by (no entries/keep-alive)
     cmc_mcp_api_key: str = ""
     cmc_mcp_endpoint: str = ""
     cmc_x402_enabled: bool = False
@@ -114,6 +115,7 @@ def load_settings(mode: str | None = None) -> Settings:
         heartbeat_seconds=int(os.getenv("GLASSBOX_HEARTBEAT_SECONDS", "900")),
         data_dir=data_dir,
         dry_run=_env_bool("GLASSBOX_DRY_RUN"),
+        trade_after=os.getenv("GLASSBOX_TRADE_AFTER", ""),
         rulebook=rulebook,
         allowlist=allowlist,
         base_currency=base_currency,

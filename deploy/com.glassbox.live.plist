@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- GlassBox LIVE — macOS launchd service.
+     Runs the live agent continuously and RESTARTS it on crash or reboot (KeepAlive +
+     RunAtLoad), so the competition agent stays up unattended. The agent itself stands
+     by (no trades) until GLASSBOX_TRADE_AFTER, so loading this early is safe.
+
+     Install:
+       cp deploy/com.glassbox.live.plist ~/Library/LaunchAgents/
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.glassbox.live.plist
+     Stop / uninstall:
+       launchctl bootout gui/$(id -u)/com.glassbox.live
+     Logs:  /tmp/glassbox.live.out  /tmp/glassbox.live.err
+     NOTE: edit the two ABSOLUTE paths below if your repo lives elsewhere. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>            <string>com.glassbox.live</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/admin/.pg/GlassBox/deploy/run_live.sh</string>
+  </array>
+  <key>WorkingDirectory</key> <string>/Users/admin/.pg/GlassBox/backend</string>
+  <key>RunAtLoad</key>        <true/>
+  <key>KeepAlive</key>        <true/>
+  <key>ThrottleInterval</key> <integer>30</integer>
+  <key>StandardOutPath</key>  <string>/tmp/glassbox.live.out</string>
+  <key>StandardErrorPath</key><string>/tmp/glassbox.live.err</string>
+</dict>
+</plist>

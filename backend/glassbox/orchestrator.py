@@ -27,6 +27,7 @@ from glassbox.models import (
     Action,
     DecisionRecord,
     GateVerdict,
+    Portfolio,
     Signals,
     TradeProposal,
 )
@@ -52,6 +53,16 @@ class Orchestrator:
         self.anchor = Anchor(settings)
         self.audit = AuditLog(settings.data_dir)
         self.portfolio = state_store.load_portfolio(settings)
+        # LIVE: the wallet is the source of truth. Start from a FRESH book reconciled
+        # off-chain (ignore any stale paper portfolio.json — its $1k high-water mark
+        # against a real $10 book would read as a 99% drawdown and trip the breaker).
+        if settings.is_live and settings.twak_access_id:
+            fresh = Portfolio(base_currency=settings.base_currency, cash_usd=0.0, positions={})
+            if self._reconcile_wallet(into=fresh):
+                self.portfolio = fresh
+                self.portfolio.high_water_mark_usd = self.portfolio.equity_usd({})
+                print(f"[live] reconciled wallet: equity ${self.portfolio.equity_usd({}):.2f} "
+                      f"cash ${self.portfolio.cash_usd:.2f} positions {list(self.portfolio.positions)}")
         self.risk_state = RiskState()
         # expose TRADEABLE allowlist symbols to the (pure) gate via the rulebook dict.
         # Signal-only tokens (BTC/BNB regime proxies) are excluded so the gate hard-blocks
@@ -61,6 +72,31 @@ class Orchestrator:
             s for s, t in settings.allowlist.items() if t.tradeable
         }
         self.anchor.register_identity()
+        # Optional scheduled start: before this instant the agent stands by (no new
+        # entries, no keep-alive) — used to begin trading exactly at the competition open.
+        self._trade_after: datetime | None = None
+        if settings.trade_after:
+            try:
+                ta = datetime.fromisoformat(settings.trade_after)
+                self._trade_after = ta if ta.tzinfo else ta.replace(tzinfo=timezone.utc)
+                print(f"[schedule] standing by — trading begins {self._trade_after.isoformat()}")
+            except ValueError:
+                print(f"[schedule] bad GLASSBOX_TRADE_AFTER {settings.trade_after!r} — ignoring")
+
+    def _reconcile_wallet(self, into: Portfolio | None = None) -> bool:
+        """Pull real on-chain balances via `twak wallet portfolio` and reconcile the
+        portfolio in place. Returns True if reconciled. Fail-safe: any error keeps the
+        last-known book (never wipes it, never crashes the cycle)."""
+        pf = into if into is not None else self.portfolio
+        try:
+            res = self.executor.cli.wallet_portfolio()
+            rows = res.raw if isinstance(res.raw, list) else (res.raw.get("balances") or [])
+            if not res.ok or not rows:
+                return False
+            return state_store.reconcile_from_wallet(pf, rows, self.s.allowlist)
+        except Exception as exc:
+            print(f"[live] wallet reconcile failed, keeping last book: {exc}")
+            return False
 
     # ── one heartbeat ────────────────────────────────────────────────────
     def run_cycle(self) -> DecisionRecord:
@@ -73,6 +109,9 @@ class Orchestrator:
         paused = bool(ctrl.get("paused", False))
         mode = ctrl.get("mode", "autonomous")
         runtime = control.read_runtime(self.s.data_dir)
+        # scheduled-start gate: before the configured instant, stand by (no entries,
+        # no keep-alive) but stay live, reconcile, and let risk exits run.
+        pre_window = self._trade_after is not None and now < self._trade_after
 
         # 1. perceive
         signals: Signals = self.perception.fetch()
@@ -82,19 +121,28 @@ class Orchestrator:
         for _sym, _tok in self.s.allowlist.items():
             if getattr(_tok, "is_stable", False):
                 signals.prices_usd.setdefault(_sym, 1.0)
+        # LIVE: refresh balances from the real wallet (source of truth) before sizing.
+        if self.s.is_live and self.s.twak_access_id:
+            self._reconcile_wallet()
         equity = self.portfolio.equity_usd(signals.prices_usd)
 
         # 2. decide the proposal. A pending one-shot user command (manual trade /
         #    wallet convert) ALWAYS takes priority and executes regardless of mode.
         #    Otherwise the active mode drives: dca schedule, manual standby, or AI.
-        if paused:
-            # PAUSE stops NEW entries — but risk exits (stop-loss / trailing stop) STILL
-            # fire, so a paused agent never lets an open loser blow past its stop.
+        if paused or pre_window:
+            # PAUSE / pre-window stops NEW entries — but risk exits (stop-loss / trailing
+            # stop) STILL fire, so an open loser never blows past its stop while standing by.
             exit_proposal = self.reasoner._check_exits(signals, self.portfolio)
+            if pre_window and not paused:
+                why = (f"pre-window — standing by until {self._trade_after.isoformat()} "
+                       "(reconciling + risk exits active, no entries yet).")
+                src = "schedule"
+            else:
+                why = "paused by operator — standing down (risk exits still active)."
+                src = "operator"
             proposal = exit_proposal or TradeProposal(
-                action=Action.HOLD, conviction=0.0,
-                rationale="paused by operator — standing down (risk exits still active).",
-                proposed_regime=signals.regime, source="operator",
+                action=Action.HOLD, conviction=0.0, rationale=why,
+                proposed_regime=signals.regime, source=src,
             )
         elif self._command_pending():
             proposal, runtime = self._manual_proposal(signals, equity, runtime)

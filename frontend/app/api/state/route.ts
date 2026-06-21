@@ -90,7 +90,12 @@ export async function GET() {
     latest,
     cycles: decisions.length,
     equity,
-    startEquity: caps.startEquity,
+    // Net-PnL baseline: in live mode use the real starting capital recorded at the
+    // first live boot (so a $10 wallet isn't measured against the $1k paper default).
+    startEquity:
+      portfolio?.initial_equity_usd && portfolio.initial_equity_usd > 0
+        ? portfolio.initial_equity_usd
+        : caps.startEquity,
     drawdownPct: latest?.drawdown_pct ?? 0,
     internalCeilingPct: eff.internalCeilingPct,
     competitionCapPct: caps.competitionCapPct,

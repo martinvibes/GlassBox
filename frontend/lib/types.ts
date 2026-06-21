@@ -77,6 +77,7 @@ export interface Portfolio {
   positions: Record<string, Position>;
   high_water_mark_usd: number;
   realized_pnl_usd?: number;
+  initial_equity_usd?: number;
 }
 
 export interface StatePayload {

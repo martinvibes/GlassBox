@@ -70,6 +70,7 @@ class Portfolio(BaseModel):
     positions: dict[str, Position] = Field(default_factory=dict)
     high_water_mark_usd: float = 0.0               # peak equity ever seen
     realized_pnl_usd: float = 0.0                  # cumulative booked P&L over the session
+    initial_equity_usd: float = 0.0                # equity baseline for net-PnL% (set once at live start)
 
     def equity_usd(self, prices_usd: dict[str, float]) -> float:
         eq = self.cash_usd

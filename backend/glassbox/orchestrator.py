@@ -57,12 +57,25 @@ class Orchestrator:
         # off-chain (ignore any stale paper portfolio.json — its $1k high-water mark
         # against a real $10 book would read as a 99% drawdown and trip the breaker).
         if settings.is_live and settings.twak_access_id:
+            prev = self.portfolio  # whatever was on disk (stale paper book, or a prior live run)
             fresh = Portfolio(base_currency=settings.base_currency, cash_usd=0.0, positions={})
             if self._reconcile_wallet(into=fresh):
+                eq = fresh.equity_usd({})
+                # initial_equity_usd is the net-PnL baseline + a "this is a live book" marker.
+                # A prior LIVE run set it (>0) → carry it + its high-water mark across the
+                # restart so PnL% and the drawdown gauge stay continuous. Otherwise (first
+                # live boot, or coming from the paper book) baseline = now, so PnL starts at 0
+                # and we ignore the stale $1k paper high-water mark.
+                if prev.initial_equity_usd > 0:
+                    fresh.initial_equity_usd = prev.initial_equity_usd
+                    fresh.high_water_mark_usd = max(prev.high_water_mark_usd, eq)
+                else:
+                    fresh.initial_equity_usd = eq
+                    fresh.high_water_mark_usd = eq
                 self.portfolio = fresh
-                self.portfolio.high_water_mark_usd = self.portfolio.equity_usd({})
-                print(f"[live] reconciled wallet: equity ${self.portfolio.equity_usd({}):.2f} "
-                      f"cash ${self.portfolio.cash_usd:.2f} positions {list(self.portfolio.positions)}")
+                state_store.save_portfolio(settings, self.portfolio)
+                print(f"[live] reconciled wallet: equity ${eq:.2f} cash ${fresh.cash_usd:.2f} "
+                      f"positions {list(fresh.positions)} baseline ${fresh.initial_equity_usd:.2f}")
         self.risk_state = RiskState()
         # expose TRADEABLE allowlist symbols to the (pure) gate via the rulebook dict.
         # Signal-only tokens (BTC/BNB regime proxies) are excluded so the gate hard-blocks

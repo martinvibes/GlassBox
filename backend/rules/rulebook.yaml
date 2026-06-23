@@ -20,15 +20,14 @@ drawdown:
   pause_after_breach_hours: 12 # cool-off before re-deploying after an internal breach
 
 sizing:
-  # Survival-first, FEW positions. Deploy at most ~2 names, modest size, so most of the
-  # book stays in stablecoin and a bad trade can only nick the equity (a position cut at
-  # the −1.5% stop loses ≈$0.03 on a $2 position).
-  max_position_pct: 30.0       # max % of equity in a single token position
-  max_gross_exposure_pct: 45.0 # hard ceiling on total deployed across all positions
-  max_trade_pct: 25.0          # max % of equity moved in a single trade (lets one buy fill a position)
+  # A FEW small positions, actively rotated. Each entry is small so a stop-out only nicks
+  # equity (≈$0.024 on a $1.60 position at the −1.5% stop); most of the book stays in cash.
+  max_position_pct: 25.0       # max % of equity in a single token position
+  max_gross_exposure_pct: 50.0 # hard ceiling on total deployed across all positions
+  max_trade_pct: 16.0          # max % of equity moved in a single trade (one buy = one position)
   min_trade_usd: 1.0           # floor: a trade must clear $1 (below this, fees dominate)
-  max_concurrent_positions: 2  # hold at most a FEW names at once — not many markets simultaneously
-  target_position_pct: 22.0    # size each new entry to ~this (≈$2.20 on a $10 book — clears the $1 min)
+  max_concurrent_positions: 3  # hold up to a FEW names at once (still mostly cash)
+  target_position_pct: 16.0    # size each new entry to ~this (≈$1.60 on a $10 book — clears the $1 min)
 
 exits:
   # A TRAILING stop is the real edge: once a position is modestly green we ratchet a
@@ -47,8 +46,8 @@ exits:
   min_hold_minutes: 0          # no minimum hold; exits may fire the next cycle
 
 conviction_entry:
-  min_entry_score: 0.012       # quality bar — trade genuine reclaim/momentum setups; only the
-                               # weakest/marginal ones are skipped (consistency, not idleness)
+  min_entry_score: 0.008       # quality bar — lowered so the agent takes real setups more
+                               # readily (2–4 trades/day), not just the daily keep-alive
 
 limits:
   max_trades_per_day: 6        # cap fee churn on a small book (cooldown + caps also bound it)
@@ -56,8 +55,8 @@ limits:
   max_slippage_bps: 80         # reject if quoted slippage exceeds this (0.80%)
 
 conviction:
-  min_score_to_enter: 0.62     # selective: only OPEN on genuine high-conviction setups (0..1)
-  min_score_to_add: 0.78       # higher bar to ADD to an existing position
+  min_score_to_enter: 0.50     # open on decent setups (looser → more real trades), still gated
+  min_score_to_add: 0.65       # higher bar to ADD to an existing position
 
 activity:
   # The competition REQUIRES ≥1 trade/day (7 over the live window) or you're DQ'd for
@@ -67,19 +66,22 @@ activity:
   # fully in stablecoin (honoring "survival > alpha" even on capitulation days, when a
   # volatile probe would correctly be blocked by the risk_off posture). Real opportunity
   # trades already satisfy the floor on active days, so the probe only fires on quiet ones.
+  # The floor now PREFERS a small REAL token trade (strongest 7d-uptrend name) so the
+  # agent stays genuinely active in the market; it only falls back to the zero-risk
+  # USDT↔USDC stablecoin swap in a true downtrend (risk_off / nothing in an uptrend).
   min_trades_total: 7          # over the whole live window
-  min_trades_per_day: 1        # ≥1 trade/day or DQ → enforce a keep-alive backstop
-  activity_trade_max_pct: 1.0  # keep-alive swap size (% of equity) — tiny, stable↔stable
+  min_trades_per_day: 3        # target ~3 trades/day (real when possible); max bounded by limits
+  activity_trade_max_pct: 1.0  # size of the stablecoin FALLBACK swap only (tiny)
 
 # Regime postures map a perceived market regime → how aggressive we may be.
 # The gate clamps proposals to the posture. Only true capitulation (risk_off) fully
 # stands the agent down; every other regime deploys, sized by conviction + these caps.
 regimes:
-  # Capped low — even fully deployed, most of the book stays in stablecoin (survival).
+  # Room for a few small positions; most of the book still rests in stablecoin.
   risk_off:    { max_gross_exposure_pct: 0.0,  note: "capitulation → stay in stablecoin" }
-  neutral:     { max_gross_exposure_pct: 25.0, note: "one small probe at most" }
-  risk_on:     { max_gross_exposure_pct: 40.0, note: "deploy on conviction, still mostly cash" }
-  euphoria:    { max_gross_exposure_pct: 25.0, note: "ride strength, fade froth carefully" }
+  neutral:     { max_gross_exposure_pct: 40.0, note: "a few small probes" }
+  risk_on:     { max_gross_exposure_pct: 50.0, note: "deploy on conviction" }
+  euphoria:    { max_gross_exposure_pct: 35.0, note: "ride strength, fade froth carefully" }
 
 defaults:
   posture: neutral             # unknown regime → trade small (not fully flat)

@@ -155,9 +155,49 @@ class Reasoner:
         clears the bar. Both momentum and reclaim dips qualify, but we DON'T fight a
         broad downtrend — when most of the market is below its 7d trend, every reclaim
         is a trap, so we sit in cash and wait for breadth to turn."""
-        if self._market_breadth(signals) < 0.40:     # broad downtrend → no new entries
+        if self._market_breadth(signals) < 0.25:     # only a severe broad collapse blocks entries
             return False
         return score >= self._entry_bar(signals)
+
+    def best_activity_entry(self, signals: Signals, portfolio: Portfolio) -> TradeProposal | None:
+        """For the activity floor: a small REAL entry into the strongest tradeable token in
+        a 7d uptrend (relaxed — ignores the breadth gate, so the agent stays active in the
+        market instead of just swapping stablecoins). Returns None in risk_off (the gate
+        would block new exposure), when already at the position cap, or when nothing is in a
+        7d uptrend (→ caller falls back to the zero-risk stablecoin keep-alive)."""
+        if signals.regime == Regime.RISK_OFF:
+            return None
+
+        def is_stable(s: str) -> bool:
+            tok = self.s.allowlist.get(s)
+            return bool(tok and tok.is_stable)
+
+        held = [s for s in portfolio.positions if not is_stable(s)]
+        max_slots = int(self.s.rulebook["sizing"].get("max_concurrent_positions", 3))
+        if len(held) >= max_slots:
+            return None
+        scored: list[tuple[float, str, str]] = []
+        for sym, blob in (signals.tokens or {}).items():
+            tok = self.s.allowlist.get(sym)
+            if tok is None or tok.is_stable or not tok.tradeable or sym in held:
+                continue
+            sc, kind = self._score_token(blob)
+            if sc > 0.0:  # genuine 7d uptrend + short-term confirmation
+                scored.append((sc, sym, kind))
+        if not scored:
+            return None
+        scored.sort(key=lambda t: t[0], reverse=True)
+        sc, sym, kind = scored[0]
+        sizing = self.s.rulebook["sizing"]
+        size = min(float(sizing["max_trade_pct"]), float(sizing.get("target_position_pct", 16.0)))
+        floor = float(self.s.rulebook["conviction"]["min_score_to_enter"])
+        return TradeProposal(
+            action=Action.BUY, symbol=sym, size_pct=size,
+            conviction=max(0.6, floor + 0.05),  # clears the gate's conviction floor
+            rationale=(f"activity entry: {sym} is the strongest tradeable 7d-uptrend name "
+                       f"({kind}) — a small real position to stay active in the market."),
+            proposed_regime=signals.regime, source="activity_floor",
+        )
 
     # ── deterministic exits: trailing stop, hard stop, take-profit backstop ──
     def _check_exits(self, signals: Signals, portfolio: Portfolio) -> TradeProposal | None:

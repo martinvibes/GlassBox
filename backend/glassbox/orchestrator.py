@@ -229,6 +229,15 @@ class Orchestrator:
         would (correctly) be blocked by the regime posture. Fires regardless of regime
         or what we hold (holding a position across a quiet day is NOT a trade); only
         skipped if there's no second stable or no stable balance to swap."""
+        # Prefer a small REAL token trade (strongest 7d-uptrend name) so the agent stays
+        # active in the market with actual exposure. Only fall back to the zero-risk
+        # stablecoin swap in a true downtrend (risk_off / nothing in an uptrend / at cap).
+        min_usd = float(self.s.rulebook["sizing"]["min_trade_usd"])
+        if self.portfolio.cash_usd >= min_usd:
+            real = self.reasoner.best_activity_entry(signals, self.portfolio)
+            if real is not None:
+                return real
+
         base_ccy = self.s.rulebook["capital"]["base_currency"]
         other = next(
             (s for s, t in self.s.allowlist.items() if t.is_stable and s != base_ccy),
@@ -242,7 +251,6 @@ class Orchestrator:
             self.portfolio.positions[other].value_usd(1.0)
             if other in self.portfolio.positions else 0.0
         )
-        min_usd = float(self.s.rulebook["sizing"]["min_trade_usd"])
         avail = max(base_avail, other_avail)
         if avail < min_usd:
             return None  # not enough stable to clear the min trade size → skip

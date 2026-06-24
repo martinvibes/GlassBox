@@ -42,7 +42,8 @@ exits:
                                # as long as they make new highs; only sold once the run rolls over
   take_profit_pct: 8.0         # extreme-spike backstop only (rare). The trailing stop does the
                                # work below this, so winners are NOT capped at a fixed target
-  stop_loss_pct: 1.5           # −1.5% on an un-armed position → cut losers FAST, keep losses small
+  stop_loss_pct: 1.2           # −1.2% on an un-armed position → tight stop, cut losers FAST
+                               # (≈$0.019 on a $1.60 position; essential when buying bounces in a weak tape)
   min_hold_minutes: 0          # no minimum hold; exits may fire the next cycle
 
 conviction_entry:

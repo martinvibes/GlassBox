@@ -160,11 +160,13 @@ class Reasoner:
         return score >= self._entry_bar(signals)
 
     def best_activity_entry(self, signals: Signals, portfolio: Portfolio) -> TradeProposal | None:
-        """For the activity floor: a small REAL entry into the strongest tradeable token in
-        a 7d uptrend (relaxed — ignores the breadth gate, so the agent stays active in the
-        market instead of just swapping stablecoins). Returns None in risk_off (the gate
-        would block new exposure), when already at the position cap, or when nothing is in a
-        7d uptrend (→ caller falls back to the zero-risk stablecoin keep-alive)."""
+        """For the activity floor: a small REAL entry that keeps the agent in actual tokens
+        rather than swapping stablecoins. Picks, in order of preference:
+          1. the strongest clean 7d-uptrend setup (score > 0), else
+          2. the strongest SHORT-TERM BOUNCE — 1h turning up and not in a 24h freefall —
+             so it still trades real tokens in a weak tape (the tight stop caps the risk).
+        Returns None only in risk_off (the gate blocks new exposure), at the position cap,
+        or when nothing is ticking up at all (→ caller uses the stablecoin keep-alive)."""
         if signals.regime == Regime.RISK_OFF:
             return None
 
@@ -176,26 +178,39 @@ class Reasoner:
         max_slots = int(self.s.rulebook["sizing"].get("max_concurrent_positions", 3))
         if len(held) >= max_slots:
             return None
-        scored: list[tuple[float, str, str]] = []
+
+        uptrends: list[tuple[float, str, str]] = []   # clean setups (score > 0)
+        bounces: list[tuple[float, str]] = []         # 1h turning up (relative strength)
         for sym, blob in (signals.tokens or {}).items():
             tok = self.s.allowlist.get(sym)
             if tok is None or tok.is_stable or not tok.tradeable or sym in held:
                 continue
             sc, kind = self._score_token(blob)
-            if sc > 0.0:  # genuine 7d uptrend + short-term confirmation
-                scored.append((sc, sym, kind))
-        if not scored:
-            return None
-        scored.sort(key=lambda t: t[0], reverse=True)
-        sc, sym, kind = scored[0]
+            m1 = float(blob.get("momentum_1h", 0.0))
+            m24 = float(blob.get("momentum_24h", 0.0))
+            if sc > 0.0:
+                uptrends.append((sc, sym, kind))
+            elif m1 > 0.0 and m24 > -0.04:   # bouncing now, not in a hard 24h freefall
+                bounces.append((m1, sym))
+
+        if uptrends:
+            uptrends.sort(key=lambda t: t[0], reverse=True)
+            _, sym, kind = uptrends[0]
+        elif bounces:
+            bounces.sort(key=lambda t: t[0], reverse=True)
+            _, sym = bounces[0]
+            kind = "short-term bounce"
+        else:
+            return None  # nothing ticking up → caller falls back to stablecoin keep-alive
+
         sizing = self.s.rulebook["sizing"]
         size = min(float(sizing["max_trade_pct"]), float(sizing.get("target_position_pct", 16.0)))
         floor = float(self.s.rulebook["conviction"]["min_score_to_enter"])
         return TradeProposal(
             action=Action.BUY, symbol=sym, size_pct=size,
             conviction=max(0.6, floor + 0.05),  # clears the gate's conviction floor
-            rationale=(f"activity entry: {sym} is the strongest tradeable 7d-uptrend name "
-                       f"({kind}) — a small real position to stay active in the market."),
+            rationale=(f"activity entry: {sym} is the strongest tradeable name ({kind}) — "
+                       f"a small real position with a tight stop to stay active in the market."),
             proposed_regime=signals.regime, source="activity_floor",
         )
 

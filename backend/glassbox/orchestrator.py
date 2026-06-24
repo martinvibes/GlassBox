@@ -245,12 +245,12 @@ class Orchestrator:
         )
         if other is None:
             return None  # no second stable to round-trip with → skip (never take risk)
-        # swap FROM whichever stable we hold more of, so the swap always has funds
-        base_avail = self.portfolio.cash_usd
-        other_avail = (
-            self.portfolio.positions[other].value_usd(1.0)
-            if other in self.portfolio.positions else 0.0
-        )
+        # swap FROM whichever stable we hold more of, so the swap always has funds.
+        # Use the per-stable balances (live) — NOT cash_usd, which lumps all stables
+        # together and would make this always drain the base currency into the other.
+        stbal = self.portfolio.stable_balances or {}
+        base_avail = stbal.get(base_ccy, self.portfolio.cash_usd)
+        other_avail = stbal.get(other, 0.0)
         avail = max(base_avail, other_avail)
         if avail < min_usd:
             return None  # not enough stable to clear the min trade size → skip

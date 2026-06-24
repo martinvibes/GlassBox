@@ -71,6 +71,8 @@ class Portfolio(BaseModel):
     high_water_mark_usd: float = 0.0               # peak equity ever seen
     realized_pnl_usd: float = 0.0                  # cumulative booked P&L over the session
     initial_equity_usd: float = 0.0                # equity baseline for net-PnL% (set once at live start)
+    stable_balances: dict[str, float] = Field(default_factory=dict)  # live: per-stablecoin USD held
+                                                   # (so execution funds a buy from the stable we actually hold)
 
     def equity_usd(self, prices_usd: dict[str, float]) -> float:
         eq = self.cash_usd

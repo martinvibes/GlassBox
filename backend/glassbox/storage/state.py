@@ -66,6 +66,7 @@ def reconcile_from_wallet(
         it is not tradeable equity, so it never inflates PnL or the drawdown gauge.
     """
     cash = 0.0
+    stables: dict[str, float] = {}                     # sym -> USD held (per stablecoin)
     chain_tokens: dict[str, tuple[float, float]] = {}  # sym -> (qty, mark_usd)
     seen_any = False
     for r in rows:
@@ -85,12 +86,14 @@ def reconcile_from_wallet(
             continue  # off-list (incl. gas BNB) → not tradeable equity
         if tok.is_stable:
             cash += usd
+            stables[sym] = stables.get(sym, 0.0) + usd
         else:
             chain_tokens[sym] = (bal, (usd / bal) if bal else 0.0)
     if not seen_any:
         return False  # empty/failed read → keep last-known book (fail-safe)
 
     portfolio.cash_usd = round(cash, 6)
+    portfolio.stable_balances = {k: round(v, 6) for k, v in stables.items()}
     for sym, (qty, mark) in chain_tokens.items():
         if sym in portfolio.positions:
             pos = portfolio.positions[sym]

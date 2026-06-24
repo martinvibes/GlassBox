@@ -85,11 +85,18 @@ class Executor:
 
         base = self.s.base_currency
         slippage_pct = self.s.rulebook["limits"]["max_slippage_bps"] / 100.0
-        # On macOS the CLI can read the password from the OS keychain, but a headless
-        # host (Railway/Linux container) has no keychain — so pass the password from the
-        # (env-sourced) settings. It is never logged: build_swap_args keeps it out of any
-        # printed output. None falls back to keychain when the env var is unset.
-        pw = self.s.twak_wallet_password or None
+        # The CLI reads the wallet password from the TWAK_WALLET_PASSWORD env var (set in
+        # TwakCLI._env) — cleaner than --password (no shell-history warning) and works
+        # headless on Linux where there is no OS keychain. So we never pass it on argv.
+        pw = None
+
+        def funding_stable() -> str:
+            """The stablecoin to spend on a BUY — the one we actually hold the most of.
+            (Keep-alives can leave the book mostly in USDC, so a USDT-only buy would
+            revert for insufficient balance. Pick the largest stable instead.)"""
+            bals = getattr(portfolio, "stable_balances", None) or {}
+            held = {s: v for s, v in bals.items() if s in self.s.allowlist and v > 0}
+            return max(held, key=held.get) if held else base
 
         def asset(s: str) -> str:
             return bsc_token_ref(self.s.allowlist[s])
@@ -107,11 +114,12 @@ class Executor:
             from_asset, to_asset = asset(from_sym), asset(sym)
         elif decision.action == Action.BUY:
             sym = decision.symbol
-            if sym not in self.s.allowlist or base not in self.s.allowlist:
+            from_ccy = funding_stable()                          # spend the stable we hold most
+            if sym not in self.s.allowlist or from_ccy not in self.s.allowlist:
                 return ExecutionResult(ok=False, action=decision.action, symbol=sym,
-                                       venue="pancakeswap", error=f"{sym}/{base} not in allowlist")
-            amount = decision.approved_notional_usd              # base (≈USD) units
-            from_asset, to_asset = asset(base), asset(sym)
+                                       venue="pancakeswap", error=f"{sym}/{from_ccy} not in allowlist")
+            amount = decision.approved_notional_usd              # stable (≈USD) units
+            from_asset, to_asset = asset(from_ccy), asset(sym)
         else:  # SELL / FLATTEN
             sym = decision.symbol
             if sym not in portfolio.positions:

@@ -95,6 +95,10 @@ class TwakCLI:
             env["TWAK_ACCESS_ID"] = self.s.twak_access_id
         if self.s.twak_hmac_secret:
             env["TWAK_HMAC_SECRET"] = self.s.twak_hmac_secret
+        # Headless signing: the CLI reads the wallet password from this env var (no OS
+        # keychain on Linux, and cleaner than --password which warns about shell history).
+        if self.s.twak_wallet_password:
+            env["TWAK_WALLET_PASSWORD"] = self.s.twak_wallet_password
         return env
 
     def run(self, args: list[str], timeout: int = 90) -> TwakResult:

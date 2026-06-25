@@ -31,6 +31,7 @@ from glassbox.models import (
     Signals,
     TradeProposal,
 )
+from glassbox.perception import onchain
 from glassbox.perception.cmc import CMCPerception
 from glassbox.reasoning.reasoner import Reasoner
 from glassbox.risk import gate as risk_gate
@@ -96,20 +97,40 @@ class Orchestrator:
             except ValueError:
                 print(f"[schedule] bad GLASSBOX_TRADE_AFTER {settings.trade_after!r} — ignoring")
 
-    def _reconcile_wallet(self, into: Portfolio | None = None) -> bool:
-        """Pull real on-chain balances via `twak wallet portfolio` and reconcile the
-        portfolio in place. Returns True if reconciled. Fail-safe: any error keeps the
-        last-known book (never wipes it, never crashes the cycle)."""
+    def _reconcile_wallet(self, prices: dict | None = None, into: Portfolio | None = None) -> bool:
+        """Reconcile the portfolio from REAL on-chain BEP-20 balances (read directly via
+        JSON-RPC — TWAK's portfolio API silently drops some token holdings, which would
+        leave a real position unmanaged). `prices` values the volatile tokens (stables=$1);
+        if omitted we fetch a snapshot. Fail-safe: any error keeps the last-known book."""
         pf = into if into is not None else self.portfolio
+        if prices is None:
+            try:
+                prices = dict(self.perception.fetch().prices_usd)
+            except Exception:
+                prices = {}
+        for sym, tok in self.s.allowlist.items():
+            if tok.is_stable:
+                prices.setdefault(sym, 1.0)
         try:
-            res = self.executor.cli.wallet_portfolio()
-            rows = res.raw if isinstance(res.raw, list) else (res.raw.get("balances") or [])
-            if not res.ok or not rows:
-                return False
-            return state_store.reconcile_from_wallet(pf, rows, self.s.allowlist)
+            balances = onchain.token_balances(
+                self.s.twak_wallet_address, self.s.allowlist, self.s.bnb_rpc_url or None
+            )
         except Exception as exc:
-            print(f"[live] wallet reconcile failed, keeping last book: {exc}")
+            print(f"[live] on-chain balance read failed, keeping last book: {exc}")
             return False
+        rows: list[dict] = []
+        for sym, bal in balances.items():
+            tok = self.s.allowlist[sym]
+            price = 1.0 if tok.is_stable else prices.get(sym)
+            if price is None:  # transient price miss → fall back to the held basis, don't drop it
+                ex = pf.positions.get(sym)
+                price = ex.avg_price_usd if ex else None
+                if price is None:
+                    continue
+            rows.append({"chain": "bsc", "symbol": sym, "balance": bal, "usdValue": bal * price})
+        if not rows:
+            return False
+        return state_store.reconcile_from_wallet(pf, rows, self.s.allowlist)
 
     # ── one heartbeat ────────────────────────────────────────────────────
     def run_cycle(self) -> DecisionRecord:
@@ -136,7 +157,7 @@ class Orchestrator:
                 signals.prices_usd.setdefault(_sym, 1.0)
         # LIVE: refresh balances from the real wallet (source of truth) before sizing.
         if self.s.is_live and self.s.twak_access_id:
-            self._reconcile_wallet()
+            self._reconcile_wallet(signals.prices_usd)
         equity = self.portfolio.equity_usd(signals.prices_usd)
 
         # 2. decide the proposal. A pending one-shot user command (manual trade /

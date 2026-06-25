@@ -17,7 +17,7 @@ source .venv/bin/activate
 export GLASSBOX_MODE=live
 # Start trading exactly at the competition open (07:00 WAT, 22 Jun = 06:00 UTC).
 export GLASSBOX_TRADE_AFTER="${GLASSBOX_TRADE_AFTER:-2026-06-22T07:00:00+01:00}"
-export GLASSBOX_HEARTBEAT_SECONDS="${GLASSBOX_HEARTBEAT_SECONDS:-120}"
+export GLASSBOX_HEARTBEAT_SECONDS="${GLASSBOX_HEARTBEAT_SECONDS:-60}"  # tighter: faster exit checks
 
 echo "=================================================================="
 echo " GlassBox LIVE — real funds on BSC (self-custody, local signing)"

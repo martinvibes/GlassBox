@@ -78,6 +78,9 @@ class Orchestrator:
                 print(f"[live] reconciled wallet: equity ${eq:.2f} cash ${fresh.cash_usd:.2f} "
                       f"positions {list(fresh.positions)} baseline ${fresh.initial_equity_usd:.2f}")
         self.risk_state = RiskState()
+        # remembers the real fill price of live buys, so the next reconcile adopts the
+        # position at its TRUE entry (not the price a cycle later) → correct PnL + stops.
+        self._entry_basis: dict[str, float] = {}
         # expose TRADEABLE allowlist symbols to the (pure) gate via the rulebook dict.
         # Signal-only tokens (BTC/BNB regime proxies) are excluded so the gate hard-blocks
         # any buy of an off-list token even if a proposal slips through — trades outside the
@@ -130,7 +133,9 @@ class Orchestrator:
             rows.append({"chain": "bsc", "symbol": sym, "balance": bal, "usdValue": bal * price})
         if not rows:
             return False
-        return state_store.reconcile_from_wallet(pf, rows, self.s.allowlist)
+        return state_store.reconcile_from_wallet(
+            pf, rows, self.s.allowlist, basis_hints=self._entry_basis
+        )
 
     # ── one heartbeat ────────────────────────────────────────────────────
     def run_cycle(self) -> DecisionRecord:
@@ -212,6 +217,11 @@ class Orchestrator:
         if execution.ok and execution.action in (Action.BUY, Action.SELL, Action.SWAP):
             if execution.notional_usd > 0:
                 self.risk_state.record_trade(now)
+            # remember the true entry price of a buy (used by the next reconcile); clear on sell
+            if execution.action == Action.BUY and execution.symbol and execution.fill_price_usd > 0:
+                self._entry_basis[execution.symbol] = execution.fill_price_usd
+            elif execution.action == Action.SELL:
+                self._entry_basis.pop(execution.symbol, None)
         # 4c. arm the pause window after a drawdown-breach flatten
         if decision.verdict == GateVerdict.FLATTEN:
             hours = self.s.rulebook["drawdown"]["pause_after_breach_hours"]

@@ -250,12 +250,13 @@ class Reasoner:
             elif tp > 0 and gain >= tp:
                 takes.append((gain, sym))
 
-        if trails:  # bank the armed winner that pulled back from its peak
+        if trails:  # the armed position pulled back from its peak → exit
             gain, sym, peak_gain = max(trails, key=lambda t: t[2])
+            outcome = "lock the gain" if gain > 0 else "exit to protect capital"
             return TradeProposal(
                 action=Action.SELL, symbol=sym, size_pct=100.0, conviction=0.95,
                 rationale=(f"trailing stop: {sym} peaked +{peak_gain:.2f}%, pulled back to "
-                           f"{gain:+.2f}% → lock the gain (a green trade is a closed trade)."),
+                           f"{gain:+.2f}% → {outcome}."),
                 proposed_regime=signals.regime, source="exit:trailing",
             )
         if losers:  # cut the worst un-armed loser first

@@ -51,6 +51,7 @@ def reconcile_from_wallet(
     rows: list[dict],
     allowlist: dict,
     chain: str = "bsc",
+    basis_hints: dict[str, float] | None = None,
 ) -> bool:
     """LIVE mode: refresh `portfolio` IN PLACE from real on-chain balances (the rows
     from `twak wallet portfolio --json`). Pure + testable; the orchestrator passes the
@@ -94,6 +95,7 @@ def reconcile_from_wallet(
 
     portfolio.cash_usd = round(cash, 6)
     portfolio.stable_balances = {k: round(v, 6) for k, v in stables.items()}
+    hints = basis_hints or {}
     for sym, (qty, mark) in chain_tokens.items():
         if sym in portfolio.positions:
             pos = portfolio.positions[sym]
@@ -102,8 +104,11 @@ def reconcile_from_wallet(
                 pos.avg_price_usd = mark
             pos.peak_price_usd = max(pos.peak_price_usd or mark, mark)
         else:
+            # New position: use the real fill price (basis_hint) if we have it, so PnL and
+            # the stop reference the actual entry — not the price a cycle later.
+            basis = float(hints.get(sym) or 0.0) or mark
             portfolio.positions[sym] = Position(
-                symbol=sym, qty=qty, avg_price_usd=mark, peak_price_usd=mark
+                symbol=sym, qty=qty, avg_price_usd=basis, peak_price_usd=mark
             )
     # drop volatile positions that are no longer on-chain (closed)
     for sym in list(portfolio.positions):

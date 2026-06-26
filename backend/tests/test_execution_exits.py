@@ -73,11 +73,11 @@ def test_take_profit_fires_on_small_green():
     s = _settings()
     r = Reasoner(s)
     pf = Portfolio(base_currency="USDT", cash_usd=500.0,
-                   positions={"WBNB": Position(symbol="WBNB", qty=1.0, avg_price_usd=600.0)},
+                   positions={"ETH": Position(symbol="ETH", qty=1.0, avg_price_usd=600.0)},
                    high_water_mark_usd=1100.0)
     tp = float(s.rulebook["exits"]["take_profit_pct"])
     mark = 600.0 * (1 + (tp + 0.5) / 100.0)             # just past the take-profit line
-    p = r.propose(Signals(regime=Regime.RISK_ON, prices_usd={"WBNB": mark}), pf)
+    p = r.propose(Signals(regime=Regime.RISK_ON, prices_usd={"ETH": mark}), pf)
     assert p.action == Action.SELL and p.source == "exit:take_profit"
 
 
@@ -85,11 +85,11 @@ def test_stop_loss_fires_on_drawdown():
     s = _settings()
     r = Reasoner(s)
     pf = Portfolio(base_currency="USDT", cash_usd=500.0,
-                   positions={"WBNB": Position(symbol="WBNB", qty=1.0, avg_price_usd=600.0)},
+                   positions={"ETH": Position(symbol="ETH", qty=1.0, avg_price_usd=600.0)},
                    high_water_mark_usd=1100.0)
     sl = float(s.rulebook["exits"]["stop_loss_pct"])
     mark = 600.0 * (1 - (sl + 0.5) / 100.0)             # just past the stop-loss line
-    p = r.propose(Signals(regime=Regime.RISK_ON, prices_usd={"WBNB": mark}), pf)
+    p = r.propose(Signals(regime=Regime.RISK_ON, prices_usd={"ETH": mark}), pf)
     assert p.action == Action.SELL and p.source == "exit:stop_loss"
 
 

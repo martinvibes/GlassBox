@@ -81,6 +81,10 @@ class Orchestrator:
         # remembers the real fill price of live buys, so the next reconcile adopts the
         # position at its TRUE entry (not the price a cycle later) → correct PnL + stops.
         self._entry_basis: dict[str, float] = {}
+        # tokens whose SELL keeps reverting on-chain (un-sellable via TWAK) → freeze them:
+        # stop trying to exit (no looping) and never re-buy. They still count toward equity.
+        self._frozen: set[str] = set()
+        self._sell_fails: dict[str, int] = {}
         # expose TRADEABLE allowlist symbols to the (pure) gate via the rulebook dict.
         # Signal-only tokens (BTC/BNB regime proxies) are excluded so the gate hard-blocks
         # any buy of an off-list token even if a proposal slips through — trades outside the
@@ -163,6 +167,7 @@ class Orchestrator:
         # LIVE: refresh balances from the real wallet (source of truth) before sizing.
         if self.s.is_live and self.s.twak_access_id:
             self._reconcile_wallet(signals.prices_usd)
+        self.reasoner.frozen = self._frozen  # don't loop-exit or re-buy un-sellable names
         equity = self.portfolio.equity_usd(signals.prices_usd)
 
         # 2. decide the proposal. A pending one-shot user command (manual trade /
@@ -222,6 +227,18 @@ class Orchestrator:
                 self._entry_basis[execution.symbol] = execution.fill_price_usd
             elif execution.action == Action.SELL:
                 self._entry_basis.pop(execution.symbol, None)
+        # FREEZE a name whose sell keeps reverting (un-sellable via TWAK) so we stop looping.
+        if execution.action == Action.SELL and execution.symbol:
+            if execution.ok and execution.notional_usd > 0:
+                self._sell_fails.pop(execution.symbol, None)
+                self._frozen.discard(execution.symbol)
+            elif not execution.ok:
+                n = self._sell_fails.get(execution.symbol, 0) + 1
+                self._sell_fails[execution.symbol] = n
+                if n >= 3:
+                    self._frozen.add(execution.symbol)
+                    print(f"[freeze] {execution.symbol} sell reverted {n}x → frozen "
+                          f"(un-sellable via TWAK); leaving it unmanaged, won't re-buy.")
         # 4c. arm the pause window after a drawdown-breach flatten
         if decision.verdict == GateVerdict.FLATTEN:
             hours = self.s.rulebook["drawdown"]["pause_after_breach_hours"]

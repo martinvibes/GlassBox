@@ -1,22 +1,22 @@
 {
-  "_comment": "TRADEABLE set = BEP-20 tokens on the official BNB HACK eligible list (trades outside it don't count). Contracts are canonical Binance-Peg BEP-20 addresses; VERIFY liquidity via `twak quote` before the live window. base_currency (USDT) must be present. tradeable:false = SIGNAL-ONLY (BTC/BNB are NOT on the eligible list, so we observe them for regime/breadth but never buy them).",
+  "_comment": "PRESERVE-CAPITAL config (final competition stretch). TWAK's aggregator can't reliably SELL thin Binance-Peg tokens (AVAX sells revert with 0xf4059071 even after approval), which would strand a position. So tradeable is restricted to the DEEPEST-liquidity BSC names that reliably round-trip: ETH + CAKE (+ the USDT/USDC stables). Everything else is tradeable:false = SIGNAL-ONLY (observed for regime/breadth, never bought). The held AVAX is signal-only/frozen here so the agent stops looping on a sell it can't complete. base_currency (USDT) must be present.",
   "chain_id": 56,
   "tokens": [
     { "symbol": "USDT", "address": "0x55d398326f99059fF775485246999027B3197955", "decimals": 18, "is_stable": true,  "coingecko_id": "tether" },
     { "symbol": "USDC", "address": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", "decimals": 18, "is_stable": true,  "coingecko_id": "usd-coin" },
-    { "symbol": "WBNB", "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", "decimals": 18, "is_stable": false, "coingecko_id": "binancecoin", "tradeable": false },
-    { "symbol": "BTCB", "address": "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c", "decimals": 18, "is_stable": false, "coingecko_id": "bitcoin", "tradeable": false },
     { "symbol": "ETH",  "address": "0x2170Ed0880ac9A755fd29B2688956BD959F933F8", "decimals": 18, "is_stable": false, "coingecko_id": "ethereum" },
     { "symbol": "CAKE", "address": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82", "decimals": 18, "is_stable": false, "coingecko_id": "pancakeswap-token" },
-    { "symbol": "XRP",  "address": "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE", "decimals": 18, "is_stable": false, "coingecko_id": "ripple" },
-    { "symbol": "ADA",  "address": "0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47", "decimals": 18, "is_stable": false, "coingecko_id": "cardano" },
-    { "symbol": "DOGE", "address": "0xbA2aE424d960c26247Dd6c32edC70B295c744C43", "decimals": 8,  "is_stable": false, "coingecko_id": "dogecoin" },
-    { "symbol": "DOT",  "address": "0x7083609fCE4d1d8Dc0C979AAb8c869Ea2C873402", "decimals": 18, "is_stable": false, "coingecko_id": "polkadot" },
-    { "symbol": "LINK", "address": "0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD", "decimals": 18, "is_stable": false, "coingecko_id": "chainlink" },
-    { "symbol": "LTC",  "address": "0x4338665CBB7B2485A8855A139b75D5e34AB0DB94", "decimals": 18, "is_stable": false, "coingecko_id": "litecoin" },
-    { "symbol": "AVAX", "address": "0x1CE0c2827e2eF14D5C4f29a091d735A204794041", "decimals": 18, "is_stable": false, "coingecko_id": "avalanche-2" },
-    { "symbol": "UNI",  "address": "0xBf5140A22578168FD562DCcF235E5D43A02ce9B1", "decimals": 18, "is_stable": false, "coingecko_id": "uniswap" },
-    { "symbol": "ATOM", "address": "0x0Eb3a705fc54725037CC9e008bDede697f62F335", "decimals": 18, "is_stable": false, "coingecko_id": "cosmos" },
-    { "symbol": "TWT",  "address": "0x4B0F1812e5Df2A09796481Ff14017e6005508003", "decimals": 18, "is_stable": false, "coingecko_id": "trust-wallet-token" }
+    { "symbol": "WBNB", "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", "decimals": 18, "is_stable": false, "coingecko_id": "binancecoin", "tradeable": false },
+    { "symbol": "BTCB", "address": "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c", "decimals": 18, "is_stable": false, "coingecko_id": "bitcoin", "tradeable": false },
+    { "symbol": "XRP",  "address": "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE", "decimals": 18, "is_stable": false, "coingecko_id": "ripple", "tradeable": false },
+    { "symbol": "ADA",  "address": "0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47", "decimals": 18, "is_stable": false, "coingecko_id": "cardano", "tradeable": false },
+    { "symbol": "DOGE", "address": "0xbA2aE424d960c26247Dd6c32edC70B295c744C43", "decimals": 8,  "is_stable": false, "coingecko_id": "dogecoin", "tradeable": false },
+    { "symbol": "DOT",  "address": "0x7083609fCE4d1d8Dc0C979AAb8c869Ea2C873402", "decimals": 18, "is_stable": false, "coingecko_id": "polkadot", "tradeable": false },
+    { "symbol": "LINK", "address": "0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD", "decimals": 18, "is_stable": false, "coingecko_id": "chainlink", "tradeable": false },
+    { "symbol": "LTC",  "address": "0x4338665CBB7B2485A8855A139b75D5e34AB0DB94", "decimals": 18, "is_stable": false, "coingecko_id": "litecoin", "tradeable": false },
+    { "symbol": "AVAX", "address": "0x1CE0c2827e2eF14D5C4f29a091d735A204794041", "decimals": 18, "is_stable": false, "coingecko_id": "avalanche-2", "tradeable": false },
+    { "symbol": "UNI",  "address": "0xBf5140A22578168FD562DCcF235E5D43A02ce9B1", "decimals": 18, "is_stable": false, "coingecko_id": "uniswap", "tradeable": false },
+    { "symbol": "ATOM", "address": "0x0Eb3a705fc54725037CC9e008bDede697f62F335", "decimals": 18, "is_stable": false, "coingecko_id": "cosmos", "tradeable": false },
+    { "symbol": "TWT",  "address": "0x4B0F1812e5Df2A09796481Ff14017e6005508003", "decimals": 18, "is_stable": false, "coingecko_id": "trust-wallet-token", "tradeable": false }
   ]
 }

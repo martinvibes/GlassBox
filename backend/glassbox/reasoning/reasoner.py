@@ -67,6 +67,10 @@ class Reasoner:
         self.s = settings
         self._use_llm = bool(settings.anthropic_api_key)
         self.memory = BrainMemory(settings.data_dir)
+        # symbols whose on-chain SELL keeps reverting (un-sellable via TWAK) — the
+        # orchestrator populates this so we stop looping on an exit we can't execute
+        # and never re-buy them. (Set each cycle.)
+        self.frozen: set[str] = set()
 
     def propose(self, signals: Signals, portfolio: Portfolio) -> TradeProposal:
         # Exits come FIRST and are deterministic: a position past its take-profit or
@@ -90,6 +94,12 @@ class Reasoner:
                 p.source = "heuristic(fallback)"
                 return p
         return self._heuristic_propose(signals, portfolio, perf)
+
+    def _manageable(self, sym: str) -> bool:
+        """A position the agent can actually trade out of: tradeable, non-stable, not
+        frozen. A held-but-unsellable bag is excluded from prune/flatten/slot logic."""
+        tok = self.s.allowlist.get(sym)
+        return bool(tok and not tok.is_stable and tok.tradeable and sym not in self.frozen)
 
     @staticmethod
     def _score_token(b: dict) -> tuple[float, str]:
@@ -120,10 +130,12 @@ class Reasoner:
         def is_stable(s: str) -> bool:
             tok = self.s.allowlist.get(s)
             return bool(tok and tok.is_stable)
-        volatile_held = [s for s in portfolio.positions if not is_stable(s)]
+        # only MANAGEABLE positions count (tradeable, not frozen) — a held-but-unsellable
+        # bag (e.g. AVAX) must not look like a "broke trend → prune" decision every cycle.
+        volatile_held = [s for s in portfolio.positions if self._manageable(s)]
         scored = {s: self._score_token(b) for s, b in (signals.tokens or {}).items()
                   if s in self.s.allowlist and not is_stable(s)
-                  and self.s.allowlist[s].tradeable}
+                  and self.s.allowlist[s].tradeable and s not in self.frozen}
         # a held name broke its uptrend → decide (prune)
         if any(scored.get(s, (-1.0, ""))[0] <= 0.0 for s in volatile_held):
             return True
@@ -183,7 +195,7 @@ class Reasoner:
         bounces: list[tuple[float, str]] = []         # 1h turning up (relative strength)
         for sym, blob in (signals.tokens or {}).items():
             tok = self.s.allowlist.get(sym)
-            if tok is None or tok.is_stable or not tok.tradeable or sym in held:
+            if tok is None or tok.is_stable or not tok.tradeable or sym in held or sym in self.frozen:
                 continue
             sc, kind = self._score_token(blob)
             m1 = float(blob.get("momentum_1h", 0.0))
@@ -235,8 +247,11 @@ class Reasoner:
         takes: list[tuple[float, str]] = []
         for sym, pos in portfolio.positions.items():
             tok = self.s.allowlist.get(sym)
-            if (tok and tok.is_stable) or pos.avg_price_usd <= 0:
-                continue  # stablecoins are cash, not trades
+            # skip stablecoins (cash), signal-only / non-tradeable holdings, and FROZEN
+            # names — don't loop on an exit we cannot execute on-chain.
+            if (tok is None or tok.is_stable or not tok.tradeable
+                    or sym in self.frozen or pos.avg_price_usd <= 0):
+                continue
             mark = signals.prices_usd.get(sym, pos.avg_price_usd)
             # update the running peak (init to entry on first sight)
             pos.peak_price_usd = max(pos.peak_price_usd or pos.avg_price_usd, mark)
@@ -290,7 +305,8 @@ class Reasoner:
         fresh: list[dict] = []
         for sym, blob in (signals.tokens or {}).items():
             if (sym not in self.s.allowlist or self.s.allowlist[sym].is_stable
-                    or not self.s.allowlist[sym].tradeable or sym in held):
+                    or not self.s.allowlist[sym].tradeable or sym in held
+                    or sym in self.frozen):
                 continue
             sc, kind = self._score_token(blob)
             if self._is_opportunity(sc, kind, signals):
@@ -383,7 +399,9 @@ class Reasoner:
             p = portfolio.positions[s]
             return p.value_usd(signals.prices_usd.get(s, p.avg_price_usd))
 
-        volatile_held = [s for s in portfolio.positions if not _is_stable(s)]
+        # only MANAGEABLE names (tradeable, not frozen) — never try to flatten/prune a
+        # held-but-unsellable bag (e.g. a frozen AVAX); it just loops on a failing sell.
+        volatile_held = [s for s in portfolio.positions if self._manageable(s)]
 
         # 0. true capitulation → de-risk to stablecoin (never churn stables)
         if signals.regime == Regime.RISK_OFF:
@@ -409,8 +427,8 @@ class Reasoner:
         for sym, blob in (signals.tokens or {}).items():
             if sym not in self.s.allowlist or _is_stable(sym):
                 continue
-            if not self.s.allowlist[sym].tradeable:
-                continue  # signal-only (BTC/BNB regime proxy) → never an entry candidate
+            if not self.s.allowlist[sym].tradeable or sym in self.frozen:
+                continue  # signal-only / frozen (un-sellable) → never an entry candidate
             slip = blob.get("est_slippage_bps")
             if slip is not None and float(slip) > self.s.rulebook["limits"]["max_slippage_bps"]:
                 continue
